@@ -1,9 +1,8 @@
 # End-to-end demo: live LLM-backed math agent.
 #
 # Prerequisite: the worker at examples/hosted-agents/cloudflare-math/
-# has been deployed (see its README). Live at
-# https://math.a2a-testbed.com — custom-domain-routed so zone-level
-# WAF rules apply.
+# has been deployed (see its README). The reference deployment lives
+# at https://math.a2a-testbed.com.
 #
 # Each step sends a real arithmetic question, the worker calls Groq's
 # Llama 3.3 in JSON mode, and the scenario runner checks that the

@@ -40,7 +40,7 @@ The loader is **deliberately minimal**: no extension-specific
 knowledge. Extensions are validated at the conformance-contract
 layer.
 
-### Layer 2: Network (`network/multitenant.py`, future `perprocess.py`)
+### Layer 2: Network (`network/multitenant.py`, `network/perprocess.py`)
 
 **Sim mode** is the testbed's default network topology. One
 Starlette + uvicorn server hosts N agents under path prefixes:
@@ -75,7 +75,7 @@ Polyglot lifecycle adapters. Each implements `start()` / `stop()` /
 | `python_subproc` | subprocess | `python main.py --agent-card ...` |
 | `go` | subprocess | `go run ./agents/go-template/ --agent-card ...` |
 | `nodejs` | subprocess | `node ./agents/nodejs-template/index.js --agent-card ...` |
-| `java` | subprocess | `java -jar ./agents/java-template/agent.jar --agent-card ...` |
+| `java` | subprocess | `java -jar ./agents/java-template/agent.jar --agent-card ...` *(reference jar not shipped yet; adapter exists, runtime kind reserved)* |
 | `external` | none | Already running; testbed only points at the URL |
 
 Subprocess runtimes share `subprocess_base.SubprocessRuntimeBase`
@@ -124,15 +124,23 @@ chain is complete and sealed."
 
 ## Wire protocol details
 
-The current implementation supports:
+The testbed's **in-process multi-tenant network shim** (the HTTP
+server `multitenant.py` boots when a scenario uses sim mode with
+`runtime: python_inproc` agents) currently exposes:
 
 - `GET /agents/<id>/.well-known/agent-card.json` → AgentCard JSON
 - `POST /agents/<id>/a2a/v1/` → JSON-RPC `message/send`
 
 Other A2A surface area (streaming, multi-turn, push notifications,
-extended cards) is on the roadmap. The minimal scope is deliberate:
-it's enough for protocol-extension testing and keeps the codebase
-auditable.
+extended cards) is on the roadmap **for the in-process shim**. This
+scope limit applies only to scenarios that route through the
+testbed's own server; the conformance contract suite probes
+streaming / subscribe / push against any external agent that
+advertises the matching capability, and the reference task-runner
+([`examples/hosted-agents/cloudflare-task-runner/`](examples/hosted-agents/cloudflare-task-runner/))
+implements every spec surface the contracts probe. The minimal
+in-process scope is deliberate: it's enough for protocol-extension
+scenario testing and keeps the in-process codebase auditable.
 
 ## What we deliberately don't do
 
@@ -158,8 +166,10 @@ areas of this testbed:
   not deeply introspect a single running agent.
 - **Multi-agent orchestration** — full. JSON AgentCards declare the
   cohort; the scenario YAML drives the flow.
-- **Cross-runtime polyglot** — full. Python, Go, Node.js, Java
-  agents in the same scenario.
+- **Cross-runtime polyglot** — full for Python, Go, Node.js in the
+  same scenario; Java adapter scaffolded but inactive (reference
+  jar pending — see
+  [`agents/java-template/`](agents/java-template/)).
 - **Failure injection** — full. Drop, delay, corrupt, HTTP-error at
   the wire seam, declared per step.
 - **Virtual time control** — full. Per-scenario clock with explicit
@@ -218,7 +228,7 @@ verdict on the same agent:
   which gives field-by-field schema enforcement for free.
 
 - **TypeScript (browser playground)** —
-  `playground/src/conformance/`. Same 23 contracts, same
+  `playground/src/conformance/`. Same 58 transport contracts, same
   ordering, same id strings, same spec citations, same strict /
   soft-pass / fail verdict model. Bundled into the static
   playground; runs in the browser when a scenario declares an
@@ -244,11 +254,15 @@ ways to add it:
 We chose the TS port. The playground is pure static (Cloudflare
 Pages, no backend) and a hosted endpoint would break that — adding
 deploy infrastructure, ongoing cost, and an HTTP hop on every
-sweep. The duplication is bounded (~23 short modules) and the
+sweep. The duplication is bounded (~58 short modules) and the
 correctness story is "run the same agent through both, prove
-equivalent verdicts" (validated against the live cloudflare-math
-worker — both surfaces report 23/23 pass, 3 soft-pass deviations
-on the same capability-consistency contracts).
+equivalent verdicts" — validated by sweeping the live hosted
+agents under [`examples/hosted-agents/`](examples/hosted-agents/)
+through both surfaces and confirming pass / soft-pass / fail rows
+match. Capabilities the agent doesn't advertise (e.g. the math
+worker has `streaming: false, pushNotifications: false`) skip
+cleanly through the same skip-gracefully pattern in both surfaces,
+keeping verdicts identical regardless of agent feature set.
 
 **The only Python-specific bit is the SDK's protobuf parser**
 (used by `well_known_card` + `agent_card_required_fields` for
@@ -335,7 +349,7 @@ against the same evidence.
 | ☑ | Conformance contract suite — 58 spec-derived transport contracts + 3 network contracts, each citing its A2A 1.0 spec section; pin + quarterly review process documented |
 | ☑ | Reference task-runner agent + push receiver (`examples/hosted-agents/cloudflare-task-runner/` and `cloudflare-push-receiver/`) — exists so the contract suite can verify its positive case against a known-conformant agent |
 | ☑ | Spec-pin metadata (`pyproject.toml` `[tool.a2a_testbed.spec]`) + `coverage` CLI + `conformance <url>` standalone sweep |
-| ☑ | Browser-side conformance port (`playground/src/conformance/`) — same 23 contracts in TS, runs against `runtime: external` agents in the visitor's browser |
+| ☑ | Browser-side conformance port (`playground/src/conformance/`) — same 58 transport contracts in TS, runs against `runtime: external` agents in the visitor's browser |
 | ☑ | Extension manifest convention + JSON-Schema validator |
 | ☑ | MCP delegation for richer per-extension semantic checks |
 | ☑ | In-browser playground (canvas + AgentCard validator + live LLM scenario + conformance sweep) |
@@ -357,7 +371,7 @@ Legend: ☑ shipped · ◐ partial · ☐ planned
 | ☑ | Track | What lands |
 |---|---|---|
 | ☑ | Core runtime | Sim mode, realistic mode, faults, virtual time, observers, multi-tenant network, polyglot runtime adapters, transport abstraction, spec-derived conformance contracts |
-| ◐ | Cross-SDK polyglot end-to-end | Go, Node.js, Java subprocess agents |
+| ◐ | Cross-SDK polyglot end-to-end | Go, Node.js subprocess agents (Python verified end-to-end); Java reference agent pending |
 | ☑ | Extension validation | ExtensionManifest convention, generic JSON-Schema validator, MCP delegation glue for richer per-extension semantic checks |
 | ☑ | Vendor compatibility | Static AgentCard compatibility check against A2A 1.0 + user-pluggable dialect-file framework for non-A2A platforms |
 | ☑ | In-browser playground | React + xyflow canvas + animation + browser-side AgentCard validator (alpha) |

@@ -13,10 +13,10 @@ name = "a2a-push-receiver"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
-# Disable the default `*.workers.dev` route in favor of a custom
-# domain on a2a-testbed.com so zone-level WAF rules apply. The
-# receiver is the most-exposed surface (CORS is open by necessity),
-# so it benefits most from being behind the WAF.
+# Disable the default `*.workers.dev` route. Hosting on a zone
+# you control unlocks WAF rules that don't apply on
+# `*.workers.dev`. Replace the route below with your own hostname
+# (or remove the [[routes]] block to fall back to workers.dev).
 workers_dev = false
 
 [[routes]]
@@ -26,11 +26,10 @@ custom_domain = true
 [observability]
 enabled = true
 
-# Per-IP rate limit. CORS is open here (the receiver must accept
-# webhooks from any agent's IP, so an allowlist isn't viable), so
-# this is the primary defense — anyone can POST junk and we don't
-# want them to burn the KV write budget. 60/min is generous for
-# legitimate agents firing one webhook per task completion.
+# Per-IP rate limit binding. CORS is open by design (the receiver
+# accepts webhooks from any agent), so this binding is the primary
+# write-cost cap. Tune `simple` to fit your usage; `period`
+# accepts only `10` or `60`.
 [[unsafe.bindings]]
 name = "RECEIVER_RATE_LIMITER"
 type = "ratelimit"

@@ -35,7 +35,8 @@ capabilities:
 
 - Spin up a multi-agent network from JSON AgentCard files.
 - Run scripted YAML scenarios across that network.
-- Compose Python + Go + Node.js + Java agents in one scenario.
+- Compose Python + Go + Node.js agents in one scenario (Java
+  runtime adapter scaffolded; reference agent on roadmap).
 - Inject failures (drop, delay, corrupt, HTTP error) at the message
   layer.
 - Advance a virtual clock to test TTLs and refresh cadences.
@@ -58,7 +59,7 @@ pip install -e ".[test]"
 a2a-testbed run examples/scenarios/three_party_consent.yaml
 
 # 2. Run a live A2A 1.0 transport-contract sweep against any deployed
-#    agent. ~23 spec-derived contracts; cites the spec section for
+#    agent. 58 spec-derived contracts; cites the spec section for
 #    each row. Use for your own Cloudflare/Lambda/GKE deployments.
 a2a-testbed conformance https://my-agent.example.com
 
@@ -163,12 +164,13 @@ a2a-testbed/
 │   ├── runtimes/        (python_inproc, python_subproc, go, nodejs, java, external)
 │   ├── network/         (multitenant — sim mode; perprocess — realistic mode)
 │   ├── transport/       (Transport protocol abstraction + A2ATransport)
-│   ├── contracts/       (39 spec-derived A2A 1.0 conformance contracts + runner)
+│   ├── contracts/       (61 spec-derived A2A 1.0 conformance contracts: 58 transport + 3 network + runner)
 │   ├── manifest/        (ExtensionManifest types, generator, store, validator)
 │   ├── extensions/      (MCP delegation glue for richer semantic validation)
 │   ├── vendors/         (AgentCard dialect framework + A2A native checker)
 │   ├── scenario.py      (orchestrator: sim and realistic modes)
 │   ├── reporter.py      (JSON, Markdown, SVG output)
+│   ├── spec_meta.py     (A2A spec pin + coverage metadata)
 │   └── cli/             (typer CLI)
 ├── agents/
 │   ├── python-template/ (subprocess Python reference agent)
@@ -193,8 +195,9 @@ observer agents.
 
 **Agent.** Identified by id, declared with an AgentCard JSON file
 and a runtime kind. Default runtime is `python_inproc` (in the
-orchestrator process); cross-SDK scenarios pick `go`, `nodejs`,
-`java`, or `external`.
+orchestrator process); cross-SDK scenarios pick `go`, `nodejs`, or
+`external`. (`java` is reserved — adapter exists but no reference
+jar ships yet; see [`agents/java-template/`](agents/java-template/).)
 
 **Mode.** A scenario picks one. `sim` (default) runs all agents in a
 single Starlette server with path-prefix routing — fast, dev-friendly.
@@ -202,9 +205,10 @@ single Starlette server with path-prefix routing — fast, dev-friendly.
 conformance and production-topology validation.
 
 **Runtime.** A polyglot adapter: `python_inproc`, `python_subproc`,
-`go`, `nodejs`, `java`, `external`. Each adapter knows how to bring
-its language's agent up, route the AgentCard JSON in, capture the
-ready handshake, and tear down on scenario exit.
+`go`, `nodejs`, `external`. Each adapter knows how to bring its
+language's agent up, route the AgentCard JSON in, capture the ready
+handshake, and tear down on scenario exit. (A `java` adapter is
+scaffolded but inactive until a reference jar ships.)
 
 **Fault.** Declared on a step. `drop`, `delay <ms>`, `corrupt`,
 `http_error <status>`. Injected client-side so the agent under test
@@ -293,6 +297,8 @@ Bundled under `examples/scenarios/`:
 | `time_advance.yaml` | Virtual clock advanced explicitly between message steps for TTL / refresh testing |
 | `observer_audit.yaml` | Observer agent receives every wire exchange via traffic taps |
 | `polyglot_smoke.yaml` | Polyglot architecture demo (in-process Python; subprocess scenarios in `tests/polyglot/`) |
+| `cloudflare_math_demo.yaml` | Live LLM-backed math agent on Cloudflare Workers (Llama 3.3 via Groq, JSON mode); semantic field-level assertions |
+| `task_runner_demo.yaml` | Live A2A 1.0 task-runner agent at `tasks.a2a-testbed.com`; full Tasks / SSE / push lifecycle, pairs with `--probe-external` for the contract sweep |
 
 ## Project goals
 

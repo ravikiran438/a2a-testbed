@@ -557,8 +557,8 @@ export default function App() {
   >(() => new Map());
   const [conformanceRunning, setConformanceRunning] = useState(false);
   // Per-URL index of the next contract to run. Drives the chunked
-  // "Run next batch" flow — sweeping all 58 in one burst trips the
-  // hosted agents' per-IP rate limits, so the user paces it.
+  // "Run next batch" flow — sweeping all 58 in one burst can trip
+  // an external agent's per-IP rate limit, so the user paces it.
   const [conformanceProgress, setConformanceProgress] = useState<
     Map<string, number>
   >(() => new Map());
@@ -840,7 +840,7 @@ export default function App() {
     setPhase('done');
     // Conformance is now user-triggered (chunked, one batch at a
     // time) instead of auto-running here — bursting all 58 contracts
-    // back-to-back was hitting hosted agents' rate limits.
+    // back-to-back can trip an external agent's per-IP rate limit.
   }, [showObserver, activeScenario]);
 
   /**
@@ -1351,8 +1351,8 @@ export default function App() {
                           contracts the CLI's{' '}
                           <code>a2a-testbed conformance</code> command
                           runs; identical verdict. Paced in batches of{' '}
-                          {CHUNK_SIZE} so a sweep against a hosted agent
-                          stays inside its rate-limit window.
+                          {CHUNK_SIZE} so a sweep stays inside the
+                          target agent's rate-limit window.
                         </p>
                         <button
                           type="button"

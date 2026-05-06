@@ -22,27 +22,22 @@ interface Env {
   GROQ_API_KEY: string;
   GROQ_MODEL: string; // pinned in wrangler.toml [vars]
   /** Cloudflare RateLimit binding declared in wrangler.toml.
-   *  Per-IP throttle for LLM calls — defends the Groq token
-   *  budget from runaway bots and cross-origin abuse. */
+   *  Per-IP throttle for LLM calls. */
   MATH_RATE_LIMITER: {
     limit: (opts: { key: string }) => Promise<{ success: boolean }>;
   };
 }
 
 // --------------------------------------------------------------------------
-// CORS origin allowlist.
-//
-// The agent is a public demo, but we still cap browser-side abuse: only
-// origins on this list get a CORS allow-origin header reflected back, so
-// JS running on other domains can't proxy traffic through this worker
-// from the browser. (Server-side bots ignore CORS, so this is paired
-// with the per-IP rate limiter below.)
+// CORS origin allowlist. Only origins listed here get a CORS
+// allow-origin header reflected back. Edit this list when forking
+// the worker for a different deployment. Server-side callers ignore
+// CORS, so the per-IP rate limiter is the cap on that path.
 // --------------------------------------------------------------------------
 
 const ALLOWED_ORIGINS: ReadonlyArray<string | RegExp> = [
   "https://a2a-testbed.com",
   "https://www.a2a-testbed.com",
-  // Vite dev server defaults (and the next port up if 5173 is taken).
   /^http:\/\/localhost:\d+$/,
   /^http:\/\/127\.0\.0\.1:\d+$/,
 ];
@@ -150,8 +145,6 @@ function jsonRpcResult(
  * Build CORS headers for the response. If the request's Origin is
  * on the allowlist we reflect it back; otherwise we omit the
  * allow-origin header entirely so browsers block the response.
- * Server-side bots ignore CORS regardless — the rate limiter
- * defends that path.
  */
 function corsHeaders(origin: string | null): Record<string, string> {
   const allowed = originAllowed(origin);

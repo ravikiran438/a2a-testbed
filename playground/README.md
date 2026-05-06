@@ -3,7 +3,7 @@
 **Hosted at [a2a-testbed.com](https://a2a-testbed.com)** — no install
 required. The instructions below are for running it locally.
 
-In-browser playground for the a2a-testbed. Three coordinated tools:
+In-browser playground for the a2a-testbed. Four coordinated tools:
 
 - **Multi-agent scenario** — a node-graph canvas (powered by
   [`@xyflow/react`](https://reactflow.dev/)) that animates message
@@ -11,11 +11,18 @@ In-browser playground for the a2a-testbed. Three coordinated tools:
   own CLI-format YAML. Click any node or edge to inspect AgentCards
   and message payloads.
 - **Live LLM agent validator** — drive a real, deployed LLM-backed
-  A2A agent from the browser. The bundled "Cloudflare math agent"
-  scenario POSTs A2A JSON-RPC to a live Cloudflare Worker (Llama 3.3
-  via Groq, JSON mode) and evaluates each step's `expect` block
-  against the actual HTTP response — the same checks the CLI runs.
-  See [Live LLM agent validation](#live-llm-agent-validation) below.
+  A2A agent from the browser. The bundled math-agent scenario
+  POSTs A2A JSON-RPC to a live worker (Llama 3.3 via Groq, JSON
+  mode) and evaluates each step's `expect` block against the
+  actual HTTP response — the same checks the CLI runs. See
+  [Live LLM agent validation](#live-llm-agent-validation) below.
+- **A2A 1.0 conformance sweep** — when a scenario declares an
+  agent with `runtime: external`, the playground exposes a
+  user-paced sweep of the same 58 spec-derived transport
+  contracts the CLI's `a2a-testbed conformance` command runs.
+  Click **Run conformance** to fire the next batch; the panel
+  shows pass / soft-pass / fail per row with the spec section
+  cited. Source under [`src/conformance/`](src/conformance/).
 - **AgentCard validator** — paste an AgentCard JSON and validate its
   declared `capabilities.extensions[]` payloads against the live
   JSON-Schema manifests published at each extension's URI. Pure
@@ -81,35 +88,16 @@ npm run build    # static dist/ ready to host on any static-file CDN
 - **Manifests are fetched over HTTPS** from each declared extension
   URI when you click *Validate*. The browser caches them per session
   via `manifestCache` in `validator.ts`.
-- No analytics is loaded by default. To enable Cloudflare Web
-  Analytics on your hosted deployment, see below.
-
-## Cloudflare Web Analytics (optional)
-
-Privacy-respecting, cookie-less, GDPR/CCPA-friendly. Off by default;
-opt-in per build.
-
-1. Create a free Web Analytics site at
-   <https://dash.cloudflare.com> → Analytics → Web Analytics → Add
-   site.
-2. Copy the site token from Cloudflare's snippet.
-3. Set `VITE_CF_ANALYTICS_TOKEN` either as a build-time env var or in
-   `.env.production`:
-
-   ```bash
-   cp .env.example .env.production
-   # edit .env.production to fill in VITE_CF_ANALYTICS_TOKEN
-   npm run build
-   ```
-
-   The `.env.*` files are git-ignored; the token isn't a secret per
-   Cloudflare's docs but doesn't need to live in source.
-4. In dev (`npm run dev`) the token stays unset, so analytics never
-   fires while you're working locally.
-
-The integration lives in `src/CloudflareAnalytics.tsx` (mounts a
-single `<script defer>` once). When `VITE_CF_ANALYTICS_TOKEN` is
-empty, the component is a no-op.
+- No analytics is loaded by default. The playground ships an
+  opt-in analytics loader at
+  [`src/CloudflareAnalytics.tsx`](src/CloudflareAnalytics.tsx) — a
+  no-op when the build-time env var is unset, otherwise it injects
+  a single `<script defer>`. Swap the script `src` for whichever
+  privacy-respecting tracker your deployment uses
+  ([Plausible](https://plausible.io), [Fathom](https://usefathom.com),
+  [GoatCounter](https://www.goatcounter.com), etc.). See
+  [`.env.example`](.env.example) for the env var pattern; `.env.*`
+  files are git-ignored.
 
 ## Project layout
 
@@ -127,8 +115,12 @@ playground/
     ├── AgentNode.tsx         # custom xyflow node
     ├── Inspector.tsx         # side-panel inspector
     ├── ValidatePanel.tsx     # AgentCard validator UI
-    ├── CloudflareAnalytics.tsx  # opt-in analytics loader
-    ├── scenario.ts           # hardcoded three-party scenario data
+    ├── CustomScenarioPanel.tsx  # paste-your-own YAML loader
+    ├── CloudflareAnalytics.tsx  # opt-in analytics loader (vendor-swappable)
+    ├── scenario.ts           # bundled three-party scenario data
+    ├── scenarioLoader.ts     # YAML → ActiveScenario adapter
+    ├── builtins/             # registered built-in scenarios + their AgentCards
+    ├── conformance/          # 58-contract A2A 1.0 transport sweep (TS port of CLI)
     ├── validator.ts          # manifest fetch + ajv validation
     ├── App.css               # all UI styles
     ├── index.css             # base reset
@@ -150,29 +142,6 @@ Page-level SEO lives in `index.html`:
 - A `SoftwareApplication` + `WebSite` JSON-LD block so search
   engines render rich-result tiles (free tool, browser-based,
   Apache 2.0, GitHub repo).
-
-## Bot protection
-
-The playground itself is static HTML/JS — there's nothing to abuse
-on the playground origin. The defendable surface is the **live LLM
-agent** at `https://math.a2a-testbed.com/` that the
-"Cloudflare math agent" scenario calls into. Three layers protect
-the Groq token budget:
-
-1. **CORS origin allowlist** in the Worker — only requests from
-   `a2a-testbed.com` (and dev localhost) get the
-   `access-control-allow-origin` header reflected back; browsers
-   on other domains can't proxy traffic.
-2. **Per-IP rate limit** via Cloudflare's built-in Rate Limiting
-   binding (`MATH_RATE_LIMITER` in `wrangler.toml`) — 30 calls per
-   60 seconds per IP. Bots get 429 with `retry-after: 60`.
-3. **Cloudflare dashboard knobs** (Bot Fight Mode, WAF, Turnstile)
-   for cases where the per-IP limit isn't enough.
-
-CORS only stops *browser* abuse; CLI bots ignore it, so the rate
-limiter is the layer that actually caps spend. Full details and
-tuning notes:
-[`examples/hosted-agents/cloudflare-math/README.md`](../examples/hosted-agents/cloudflare-math/README.md#defending-the-llm-endpoint-from-rogue-bots).
 
 ## License
 

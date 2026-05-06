@@ -9,15 +9,14 @@ import { clearAllSweepCaches } from './cache';
 import { ALL_CONTRACTS } from './contracts';
 import type { Contract, ContractResult } from './types';
 
-/** Default chunk size for `runConformanceChunk`. Sized so each
- *  batch comfortably fits inside a 60-second rate-limit window
- *  on the hosted reference agents — leaves headroom for the user
- *  to re-run a chunk without tripping limits. */
+/** Default chunk size for `runConformanceChunk`. Sized to leave
+ *  headroom inside a typical per-IP rate-limit window so the user
+ *  can re-run a chunk without tripping limits. */
 export const CHUNK_SIZE = 10;
 
 /**
  * Run a slice of the contract list. Used by the playground UI to
- * pace requests against rate-limited hosted agents — the user
+ * pace requests against rate-limited external agents — the user
  * clicks through batches instead of bursting all 58 calls at once.
  *
  * `startIndex === 0` clears every per-sweep cache so a fresh

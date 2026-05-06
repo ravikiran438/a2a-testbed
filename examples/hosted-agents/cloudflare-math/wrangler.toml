@@ -17,16 +17,13 @@ name = "a2a-math-agent"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
-# Disable the default `*.workers.dev` route. workers.dev URLs are
-# on Cloudflare's shared zone where customers can't add WAF rules,
-# zone-level rate limits, or custom transform rules — only the
-# baked-in defenses (Bot Fight Mode, this worker's own RateLimit
-# binding) apply. Routing through a custom domain on our own zone
-# unlocks the full Cloudflare security feature set.
+# Disable the default `*.workers.dev` route. Hosting on a zone you
+# control unlocks WAF rules, zone-level rate limits, and transform
+# rules that don't apply on `*.workers.dev`. Replace the route
+# below with your own hostname (or remove the [[routes]] block to
+# use the default workers.dev URL).
 workers_dev = false
 
-# Bind the worker to a subdomain on a2a-testbed.com (already on
-# this Cloudflare account, so DNS + cert provision automatically).
 [[routes]]
 pattern = "math.a2a-testbed.com"
 custom_domain = true
@@ -37,20 +34,10 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 [observability]
 enabled = true
 
-# Per-IP rate limit. Defends the Groq token budget from runaway
-# bots and from cross-origin abuse (CORS only blocks browsers; CLI
-# bots ignore CORS, so this layer is what actually caps cost).
-#
+# Per-IP rate limit binding. Tune `simple` to fit your usage:
 #   key:    `cf-connecting-ip` of the requester (set by Cloudflare).
 #   limit:  number of requests allowed in the window.
 #   period: 10 or 60 (seconds) — the only values the binding accepts.
-#
-# Tuning: a browser conformance sweep makes ~30 HTTP requests
-# in ~10 seconds; the live LLM scenario layers another 3 calls.
-# 60/min/IP gives sweep + scenario + small re-run headroom while
-# still capping a single IP to 60 LLM calls per minute. Defense
-# in depth via Bot Fight Mode + the zone-level rate limiting rule
-# means this binding can be relatively generous.
 [[unsafe.bindings]]
 name = "MATH_RATE_LIMITER"
 type = "ratelimit"

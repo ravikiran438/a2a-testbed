@@ -112,103 +112,43 @@ Wrangler starts a local server at <http://localhost:8787>. Both the
 AgentCard endpoint and the JSON-RPC endpoint work the same as in
 production.
 
-## Custom domain instead of `*.workers.dev`
+## Custom domain vs. `*.workers.dev`
 
-The worker is bound to `math.a2a-testbed.com`, not the default
-`*.workers.dev` subdomain. This is deliberate — `workers.dev` lives
-on Cloudflare's shared zone where customers can't add WAF rules,
-zone-level rate limits, or custom transform rules. Routing through
-a subdomain on a zone you own unlocks the full Cloudflare security
-toolkit:
+`workers_dev = false` in `wrangler.toml` disables Cloudflare's
+default subdomain so the worker only answers traffic from the
+custom domain you bind to it. Hosting on a zone you control gives
+you access to Cloudflare's full security toolkit (WAF rules, zone
+rate limits, transform rules, analytics) — none of which apply on
+`*.workers.dev`. If you fork this worker, swap the
+`[[routes]]` block for your own hostname or remove it to fall
+back to a `workers.dev` URL.
 
-- Custom WAF rules (block by ASN, country, User-Agent regex, etc.)
-- Zone-level rate limiting (more flexible than the binding here)
-- Transform Rules / Cache Rules
-- Per-route analytics
+## Cost defenses (tunable)
 
-`workers_dev = false` in `wrangler.toml` disables the default
-subdomain entirely so the only ingress is via the custom domain
-where your zone-level rules apply.
+The worker is a public LLM endpoint, so cost-control is on the
+operator:
 
-### Recommended dashboard rules to add
+- **CORS origin allowlist** — edit `ALLOWED_ORIGINS` in
+  `src/index.ts` to whichever origins your UI runs on. Server-side
+  callers ignore CORS, so this is browser-only.
+- **Per-IP rate limit** — the `MATH_RATE_LIMITER` binding in
+  `wrangler.toml` (`simple = { limit, period }`) caps requests
+  per IP. `period` accepts only `10` or `60`. Tune to your usage.
+  Returns HTTP 429 + a JSON-RPC error envelope when tripped.
+- **Cloudflare dashboard knobs** — Bot Fight Mode, WAF custom
+  rules, and Turnstile are all configurable per-zone if you want
+  defenses that apply before the worker is invoked.
 
-Once the worker is deployed, in the Cloudflare dashboard for
-`a2a-testbed.com`:
+What this worker deliberately doesn't do:
 
-1. **Security → Bots → Bot Fight Mode: ON.** Free, blocks known
-   scraper signatures before they reach the worker.
-2. **Security → WAF → Custom rules → Add rule:**
-   - Name: `block-non-browser-on-math`
-   - Expression:
-     `(http.host eq "math.a2a-testbed.com")
-        and (cf.bot_management.score lt 30)
-        and not (http.user_agent contains "a2a-testbed")`
-   - Action: Block
-   - Cuts off cheap automated scrapers without blocking the
-     testbed's own conformance probes.
-3. **Security → WAF → Rate limiting rules → Add:**
-   - Name: `math-burst-limit`
-   - Match: `http.host eq "math.a2a-testbed.com"`
-   - Rate: 100 requests / 1 minute / IP
-   - Action: Block (1 minute mitigation)
-   - Layers on top of the per-Worker `MATH_RATE_LIMITER` binding.
-
-These rules apply BEFORE the worker code runs, so a blocked
-request doesn't burn a Worker invocation.
-
-## Defending the LLM endpoint from rogue bots
-
-The agent's URL is public and CORS doesn't stop server-side scrapers.
-Three layers — applied in order of cost-to-add — keep the Groq token
-budget under control:
-
-1. **CORS origin allowlist (in this worker).** `corsHeaders()` only
-   reflects an `access-control-allow-origin` header back to origins
-   on the allowlist (`a2a-testbed.com`, dev `localhost`). Browsers
-   on other domains can't proxy traffic through the worker. Edit
-   `ALLOWED_ORIGINS` in `src/index.ts` if you fork this for your
-   own deployment.
-
-2. **Per-IP rate limit (in this worker).** The
-   `MATH_RATE_LIMITER` binding declared in `wrangler.toml` caps any
-   single IP at 30 LLM calls per 60 seconds via Cloudflare's
-   built-in Rate Limiting API (free tier, no Durable Objects
-   required). When tripped, the worker returns HTTP 429 with a
-   JSON-RPC error envelope; legitimate users see "rate limit
-   exceeded — try again in a minute," bots get throttled. Tune the
-   `simple = { limit, period }` line in `wrangler.toml` to match
-   your traffic. Per-period values are restricted to **10 or 60**
-   seconds.
-
-3. **Cloudflare dashboard knobs (no code changes).** The defenses
-   below are toggled in the Cloudflare dashboard for the worker's
-   route — they apply *before* your Worker code runs, so a blocked
-   request doesn't burn an invocation:
-   - **Bot Fight Mode** (Security → Bots): free, blocks known
-     scraper signatures. Recommended on for any public LLM agent.
-   - **WAF custom rules** (Security → WAF): block by ASN, country,
-     or User-Agent if you see abuse pile up from one source.
-   - **Cloudflare Turnstile** (Turnstile → Add site): free CAPTCHA
-     replacement. If you ever expose this agent to a UI form, gate
-     the request behind a Turnstile token to prove a human clicked.
-
-What we deliberately *don't* do:
-
-- **No shared-secret auth.** The playground is open-source and the
-  bundle ships to every visitor; any token in the JS would be public
-  the moment the page loads. Auth requires a server-side proxy
-  (which defeats the "live demo" framing) or a per-user token issued
-  after a sign-in flow (overkill for a side project).
-- **No prompt-content filtering.** The system prompt pins the
-  output schema; off-topic inputs get `{"answer": null, ...}`. We
-  don't try to detect or block adversarial prompts beyond that —
-  the rate limiter is the cost cap, and the JSON-mode constraint
-  is the output cap.
-
-If costs spike anyway: rotate the Groq API key, lower the
-rate-limit `limit`, or temporarily set the `Bot Fight Mode` to
-"super bot fight mode" while you investigate the Cloudflare
-analytics tab to find the offending ASN/UA pattern.
+- **No shared-secret auth.** Any client-side token is public the
+  moment the page loads. Real auth requires a server-side proxy
+  or per-user issuance after sign-in — overkill for a public
+  reference agent.
+- **No prompt-content filtering.** The JSON-mode system prompt
+  pins the output schema; off-topic inputs return
+  `{"answer": null, ...}`. The rate limiter is the cost cap; the
+  schema is the output cap.
 
 ## Operational notes
 
