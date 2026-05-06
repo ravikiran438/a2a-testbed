@@ -45,12 +45,14 @@ enabled = true
 #   limit:  number of requests allowed in the window.
 #   period: 10 or 60 (seconds) — the only values the binding accepts.
 #
-# Tuning: a normal playground run is 3 requests; 30/min lets users
-# re-run and tab-juggle without throttling while still capping a
-# single IP to ~30 LLM calls per minute. Bump this if the demo
-# grows; lower it if you see abuse in Cloudflare Workers analytics.
+# Tuning: a browser conformance sweep makes ~30 HTTP requests
+# in ~10 seconds; the live LLM scenario layers another 3 calls.
+# 60/min/IP gives sweep + scenario + small re-run headroom while
+# still capping a single IP to 60 LLM calls per minute. Defense
+# in depth via Bot Fight Mode + the zone-level rate limiting rule
+# means this binding can be relatively generous.
 [[unsafe.bindings]]
 name = "MATH_RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 30, period = 60 }
+simple = { limit = 60, period = 60 }

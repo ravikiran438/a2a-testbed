@@ -3,7 +3,7 @@
 // body — Cloudflare Workers + the math-agent already return event-stream
 // bodies in browser-readable form, no preflight tweaks needed.
 
-import { jsonRpcCall } from '../transport';
+import { fetchCard, jsonRpcCall } from '../transport';
 
 export const PUSH_RECEIVER_BASE = 'https://push.a2a-testbed.com';
 
@@ -112,14 +112,14 @@ export function pushSkipDetail(
 export async function fetchCardJson(
   agentUrl: string,
 ): Promise<Record<string, unknown>> {
-  const url = agentUrl.replace(/\/$/, '') + '/.well-known/agent-card.json';
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  try {
-    const body = (await res.json()) as Record<string, unknown>;
-    return body ?? {};
-  } catch {
-    return {};
-  }
+  // Delegates to transport.fetchCard so the per-sweep cache is
+  // shared. Streaming/push/subscribe contracts each call this for
+  // capability lookup; without sharing they'd each fire a separate
+  // GET against the agent.
+  const { body } = await fetchCard(agentUrl);
+  return body && typeof body === 'object'
+    ? (body as Record<string, unknown>)
+    : {};
 }
 
 export function freshToken(): string {

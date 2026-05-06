@@ -4,6 +4,8 @@
 // (`/a2a/v1/`) so we hardcode them here instead of plumbing a
 // Transport interface through every contract.
 
+import { createSweepCache } from './cache';
+
 const CARD_PATH = '/.well-known/agent-card.json';
 const RPC_PATH = '/a2a/v1/';
 
@@ -19,17 +21,24 @@ export interface CardFetchResult {
   body: unknown;
 }
 
+// Half the conformance contracts each fetch the AgentCard
+// independently; the cache cuts a typical sweep from ~10 redundant
+// fetches to 1. Cleared between sweeps via the registry in cache.ts.
+const cardCache = createSweepCache<string, CardFetchResult>();
+
 export async function fetchCard(agentUrl: string): Promise<CardFetchResult> {
-  const url = stripTrailing(agentUrl) + CARD_PATH;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  const raw = await res.text();
-  let body: unknown = null;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    /* leave body as null; contract decides whether to fail */
-  }
-  return { status: res.status, raw, body };
+  return cardCache.getOrFetch(agentUrl, async () => {
+    const url = stripTrailing(agentUrl) + CARD_PATH;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const raw = await res.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      /* leave body as null; contract decides whether to fail */
+    }
+    return { status: res.status, raw, body };
+  });
 }
 
 export interface RpcResult {

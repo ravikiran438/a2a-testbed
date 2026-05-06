@@ -5,12 +5,16 @@
 // the same scenario produces the same verdict regardless of
 // surface.
 
+import { clearAllSweepCaches } from './cache';
 import { ALL_CONTRACTS } from './contracts';
 import type { Contract, ContractResult } from './types';
 
 export async function runConformanceSweep(
   agentUrl: string,
 ): Promise<ContractResult[]> {
+  // Drop every per-sweep cache (AgentCard today, plus anything else
+  // helpers register later) so a fresh sweep sees current agent state.
+  clearAllSweepCaches();
   const results: ContractResult[] = [];
   for (const contract of ALL_CONTRACTS) {
     results.push(await runOne(contract, agentUrl));
