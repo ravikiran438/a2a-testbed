@@ -29,7 +29,11 @@ import {
   type BuiltinScenarioDef,
 } from './builtins';
 import { ALL_CONTRACTS } from './conformance/contracts';
-import { runConformanceSweep, summarize } from './conformance/runner';
+import {
+  CHUNK_SIZE,
+  runConformanceChunk,
+  summarize,
+} from './conformance/runner';
 import type { ContractResult } from './conformance/types';
 import './App.css';
 
@@ -552,6 +556,12 @@ export default function App() {
     Map<string, ContractResult[]>
   >(() => new Map());
   const [conformanceRunning, setConformanceRunning] = useState(false);
+  // Per-URL index of the next contract to run. Drives the chunked
+  // "Run next batch" flow — sweeping all 58 in one burst trips the
+  // hosted agents' per-IP rate limits, so the user paces it.
+  const [conformanceProgress, setConformanceProgress] = useState<
+    Map<string, number>
+  >(() => new Map());
   // Accordion: panel starts expanded so users see the body's intent
   // copy ("Click Run scenario to drive…") without an extra click.
   // Toggling collapses to a one-line header so the sidebar reclaims
@@ -828,26 +838,56 @@ export default function App() {
     }
     setActiveStep(null);
     setPhase('done');
+    // Conformance is now user-triggered (chunked, one batch at a
+    // time) instead of auto-running here — bursting all 58 contracts
+    // back-to-back was hitting hosted agents' rate limits.
+  }, [showObserver, activeScenario]);
 
-    // Conformance sweep — same contracts the CLI's `conformance`
-    // command runs, ported to TS so the static playground can do
-    // it without a backend. Off-loop after the scenario animation
-    // so the run summary appears immediately and the sweep
-    // populates afterwards.
-    if (activeScenario.externalUrls.length > 0) {
-      setConformanceRunning(true);
-      // Auto-expand the accordion so the user sees the running state
-      // without needing to click. They can collapse afterwards.
-      setConformanceExpanded(true);
-      const sweeps = await Promise.all(
-        activeScenario.externalUrls.map(
-          async (url) => [url, await runConformanceSweep(url)] as const,
-        ),
+  /**
+   * Run the next chunk of conformance contracts against every
+   * external agent in parallel. The runner clears caches when
+   * `startIndex === 0`, so calling this from a fresh state
+   * effectively starts a new sweep; calling it again continues
+   * from where the previous chunk left off.
+   */
+  const runNextConformanceBatch = useCallback(async () => {
+    const urls = activeScenario.externalUrls;
+    if (urls.length === 0 || conformanceRunning) return;
+    setConformanceRunning(true);
+    setConformanceExpanded(true);
+    try {
+      const updates = await Promise.all(
+        urls.map(async (url) => {
+          const startIndex = conformanceProgress.get(url) ?? 0;
+          const chunk = await runConformanceChunk(url, startIndex, CHUNK_SIZE);
+          return { url, startIndex, chunk };
+        }),
       );
-      setConformanceResults(new Map(sweeps));
+      setConformanceResults((prev) => {
+        const next = new Map(prev);
+        for (const { url, startIndex, chunk } of updates) {
+          const existing = startIndex === 0 ? [] : next.get(url) ?? [];
+          next.set(url, [...existing, ...chunk]);
+        }
+        return next;
+      });
+      setConformanceProgress((prev) => {
+        const next = new Map(prev);
+        for (const { url, startIndex, chunk } of updates) {
+          next.set(url, startIndex + chunk.length);
+        }
+        return next;
+      });
+    } finally {
       setConformanceRunning(false);
     }
-  }, [showObserver, activeScenario]);
+  }, [activeScenario, conformanceProgress, conformanceRunning]);
+
+  /** Reset the chunked sweep so the next click starts at contract 0. */
+  const resetConformance = useCallback(() => {
+    setConformanceResults(new Map());
+    setConformanceProgress(new Map());
+  }, []);
 
   const reset = useCallback(() => {
     setPhase('idle');
@@ -1299,21 +1339,38 @@ export default function App() {
                   >
                   {conformanceRunning && (
                     <div className="conformance-running">
-                      Running {ALL_CONTRACTS.length}-contract sweep against{' '}
-                      {activeScenario.externalUrls.length}{' '}
-                      external agent
-                      {activeScenario.externalUrls.length === 1 ? '' : 's'}…
+                      Running batch of {CHUNK_SIZE} contracts…
                     </div>
                   )}
-                  {!conformanceRunning && conformanceResults.size === 0 && (
-                    <div className="conformance-pending">
-                      Click <strong>Run scenario</strong> to drive the
-                      flow AND run the spec-derived contract sweep
-                      against this agent. Same {ALL_CONTRACTS.length} contracts the CLI's{' '}
-                      <code>a2a-testbed conformance</code> command
-                      runs; identical verdict.
-                    </div>
-                  )}
+                  {!conformanceRunning &&
+                    conformanceResults.size === 0 &&
+                    activeScenario.externalUrls.length > 0 && (
+                      <div className="conformance-pending">
+                        <p>
+                          Spec-derived contract sweep — same {ALL_CONTRACTS.length}{' '}
+                          contracts the CLI's{' '}
+                          <code>a2a-testbed conformance</code> command
+                          runs; identical verdict. Paced in batches of{' '}
+                          {CHUNK_SIZE} so a sweep against a hosted agent
+                          stays inside its rate-limit window.
+                        </p>
+                        <button
+                          type="button"
+                          className="conformance-run-btn"
+                          onClick={runNextConformanceBatch}
+                        >
+                          Run conformance ({CHUNK_SIZE} of {ALL_CONTRACTS.length})
+                        </button>
+                      </div>
+                    )}
+                  {!conformanceRunning &&
+                    conformanceResults.size === 0 &&
+                    activeScenario.externalUrls.length === 0 && (
+                      <div className="conformance-pending">
+                        Conformance only runs against agents declared
+                        with <code>runtime: external</code>.
+                      </div>
+                    )}
                   {[...conformanceResults.entries()].map(([url, results]) => {
                     const sum = summarize(results);
                     return (
@@ -1365,6 +1422,46 @@ export default function App() {
                       </div>
                     );
                   })}
+                  {conformanceResults.size > 0 && (() => {
+                    // All URLs share the contract list, so any URL's
+                    // progress reflects sweep position. Pick the
+                    // smallest so the button reflects the trailing
+                    // agent in a multi-agent scenario.
+                    let minDone = ALL_CONTRACTS.length;
+                    for (const url of activeScenario.externalUrls) {
+                      const done = conformanceProgress.get(url) ?? 0;
+                      if (done < minDone) minDone = done;
+                    }
+                    const remaining = ALL_CONTRACTS.length - minDone;
+                    const nextBatch = Math.min(CHUNK_SIZE, remaining);
+                    return (
+                      <div className="conformance-footer">
+                        {remaining > 0 ? (
+                          <button
+                            type="button"
+                            className="conformance-run-btn"
+                            onClick={runNextConformanceBatch}
+                            disabled={conformanceRunning}
+                          >
+                            Run next {nextBatch} ({minDone}/
+                            {ALL_CONTRACTS.length} done)
+                          </button>
+                        ) : (
+                          <span className="conformance-done">
+                            All {ALL_CONTRACTS.length} contracts run.
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="conformance-reset-btn"
+                          onClick={resetConformance}
+                          disabled={conformanceRunning}
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    );
+                  })()}
                   </div>
                 </section>
               )}

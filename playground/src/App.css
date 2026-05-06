@@ -1597,6 +1597,49 @@
   padding: 1px 5px;
   border-radius: 3px;
 }
+.conformance-pending p {
+  margin: 0 0 10px;
+}
+.conformance-run-btn,
+.conformance-reset-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1e293b;
+  cursor: pointer;
+}
+.conformance-run-btn {
+  background: #1e293b;
+  border-color: #1e293b;
+  color: #fff;
+}
+.conformance-run-btn:hover:not(:disabled) {
+  background: #0f172a;
+}
+.conformance-reset-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+.conformance-run-btn:disabled,
+.conformance-reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.conformance-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+}
+.conformance-done {
+  font-size: 12px;
+  color: #475569;
+  flex: 1;
+}
 .conformance-block + .conformance-block {
   margin-top: 12px;
   padding-top: 12px;

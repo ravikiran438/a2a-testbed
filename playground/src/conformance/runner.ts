@@ -9,6 +9,35 @@ import { clearAllSweepCaches } from './cache';
 import { ALL_CONTRACTS } from './contracts';
 import type { Contract, ContractResult } from './types';
 
+/** Default chunk size for `runConformanceChunk`. Sized so each
+ *  batch comfortably fits inside a 60-second rate-limit window
+ *  on the hosted reference agents — leaves headroom for the user
+ *  to re-run a chunk without tripping limits. */
+export const CHUNK_SIZE = 10;
+
+/**
+ * Run a slice of the contract list. Used by the playground UI to
+ * pace requests against rate-limited hosted agents — the user
+ * clicks through batches instead of bursting all 58 calls at once.
+ *
+ * `startIndex === 0` clears every per-sweep cache so a fresh
+ * sweep sees current agent state. Subsequent chunks reuse the
+ * cache (AgentCard, etc.) since they're part of the same sweep.
+ */
+export async function runConformanceChunk(
+  agentUrl: string,
+  startIndex: number,
+  size: number = CHUNK_SIZE,
+): Promise<ContractResult[]> {
+  if (startIndex === 0) clearAllSweepCaches();
+  const end = Math.min(startIndex + size, ALL_CONTRACTS.length);
+  const out: ContractResult[] = [];
+  for (let i = startIndex; i < end; i++) {
+    out.push(await runOne(ALL_CONTRACTS[i], agentUrl));
+  }
+  return out;
+}
+
 export async function runConformanceSweep(
   agentUrl: string,
 ): Promise<ContractResult[]> {
