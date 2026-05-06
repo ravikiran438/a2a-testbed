@@ -279,14 +279,21 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    // AgentCard discovery
+    // AgentCard discovery. Same JSON for every caller, so we let
+    // Cloudflare's edge cache it (s-maxage=300) and the browser
+    // hold it briefly (max-age=60). The card barely changes between
+    // deploys; conformance correctness is verified against the live
+    // JSON-RPC handlers, not this static descriptor.
     if (
       req.method === "GET" &&
       (url.pathname === "/" ||
         url.pathname === "/.well-known/agent-card.json")
     ) {
       return Response.json(buildAgentCard(selfUrl), {
-        headers: corsHeaders(origin),
+        headers: {
+          ...corsHeaders(origin),
+          "cache-control": "public, max-age=60, s-maxage=300",
+        },
       });
     }
 
