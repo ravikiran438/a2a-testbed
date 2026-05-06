@@ -552,6 +552,11 @@ export default function App() {
     Map<string, ContractResult[]>
   >(() => new Map());
   const [conformanceRunning, setConformanceRunning] = useState(false);
+  // Accordion: panel starts expanded so users see the body's intent
+  // copy ("Click Run scenario to drive…") without an extra click.
+  // Toggling collapses to a one-line header so the sidebar reclaims
+  // space when the user wants to focus on the canvas/inspector.
+  const [conformanceExpanded, setConformanceExpanded] = useState(true);
 
   // Per-agent card loader. When an agent in a custom scenario has no
   // card yet (only a path-string hint), the AgentNode shows a "?"
@@ -831,6 +836,9 @@ export default function App() {
     // populates afterwards.
     if (activeScenario.externalUrls.length > 0) {
       setConformanceRunning(true);
+      // Auto-expand the accordion so the user sees the running state
+      // without needing to click. They can collapse afterwards.
+      setConformanceExpanded(true);
       const sweeps = await Promise.all(
         activeScenario.externalUrls.map(
           async (url) => [url, await runConformanceSweep(url)] as const,
@@ -1225,8 +1233,70 @@ export default function App() {
 
               {(activeScenario.runtimeKind === 'external' ||
                 conformanceResults.size > 0) && (
-                <section className="panel conformance">
-                  <h3>A2A 1.0 conformance</h3>
+                <section
+                  className={
+                    conformanceExpanded
+                      ? 'panel conformance'
+                      : 'panel conformance is-collapsed'
+                  }
+                >
+                  <button
+                    type="button"
+                    className="conformance-toggle"
+                    onClick={() => setConformanceExpanded((v) => !v)}
+                    aria-expanded={conformanceExpanded}
+                    aria-controls="conformance-body"
+                  >
+                    <span
+                      className="conformance-chevron"
+                      aria-hidden="true"
+                    >
+                      ▾
+                    </span>
+                    <span className="conformance-title">
+                      A2A 1.0 conformance
+                    </span>
+                    {/* Header summary visible whether expanded or not.
+                        Lets users see the verdict without expanding. */}
+                    {conformanceResults.size > 0 && !conformanceRunning && (
+                      <span className="conformance-summary">
+                        {(() => {
+                          let total = 0;
+                          let passed = 0;
+                          let failed = 0;
+                          for (const results of conformanceResults.values()) {
+                            const sum = summarize(results);
+                            total += sum.total;
+                            passed += sum.passed;
+                            failed += sum.failed;
+                          }
+                          const ok = failed === 0;
+                          return (
+                            <span
+                              className={
+                                ok
+                                  ? 'conformance-verdict ok'
+                                  : 'conformance-verdict fail'
+                              }
+                            >
+                              {ok ? '✓' : '✗'} {passed}/{total}
+                            </span>
+                          );
+                        })()}
+                      </span>
+                    )}
+                    {conformanceRunning && (
+                      <span className="conformance-summary running">
+                        running…
+                      </span>
+                    )}
+                  </button>
+
+                  <div
+                    id="conformance-body"
+                    className="conformance-body"
+                    hidden={!conformanceExpanded}
+                  >
                   {conformanceRunning && (
                     <div className="conformance-running">
                       Running {ALL_CONTRACTS.length}-contract sweep against{' '}
@@ -1295,6 +1365,7 @@ export default function App() {
                       </div>
                     );
                   })}
+                  </div>
                 </section>
               )}
             </aside>

@@ -1518,10 +1518,61 @@
 /* Conformance panel (sidebar)                                            */
 /* ---------------------------------------------------------------------- */
 
-.panel.conformance h3 {
+/* The conformance panel is an accordion. The whole header bar is a
+   button so the click target is large; the chevron rotates to
+   signal state. */
+.panel.conformance {
+  padding: 0;
+}
+.panel.conformance .conformance-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+}
+.panel.conformance .conformance-toggle:hover {
+  background: #f1f5f9;
+}
+.panel.conformance .conformance-toggle:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: -2px;
+}
+.panel.conformance .conformance-chevron {
+  display: inline-block;
+  width: 14px;
+  font-size: 12px;
+  color: #64748b;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+.panel.conformance.is-collapsed .conformance-chevron {
+  transform: rotate(-90deg);
+}
+.panel.conformance .conformance-title {
+  flex: 1;
+}
+.panel.conformance .conformance-summary {
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+}
+.panel.conformance .conformance-summary.running {
+  font-style: italic;
+  color: #6366f1;
+}
+.panel.conformance .conformance-body {
+  padding: 0 14px 14px 14px;
 }
 .conformance-running {
   font-size: 12px;
