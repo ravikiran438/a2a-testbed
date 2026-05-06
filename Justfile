@@ -139,6 +139,18 @@ math-demo:
 task-runner-demo:
     a2a-testbed run --probe-external examples/scenarios/task_runner_demo.yaml
 
+# Run a2aproject/a2a-tck against the deployed task-runner agent.
+# Requires a sibling clone of a2a-tck at ../a2a-tck (override with TCK
+# env var) and `uv` on PATH. Treats the task-runner as TCK's SUT —
+# two independent verdicts on the same agent (testbed contracts +
+# TCK compliance categorization).
+tck-against-task-runner tck="../a2a-tck":
+    cd "{{tck}}" && \
+        (test -d .venv || uv venv) && \
+        . .venv/bin/activate && \
+        uv pip install -e . >/dev/null && \
+        ./run_tck.py --sut-url https://tasks.a2a-testbed.com --category all
+
 # Validate a live agent's AgentCard at the given URL.
 #   just card https://my-agent.example.com
 card url:

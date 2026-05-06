@@ -111,6 +111,32 @@ a2a-testbed run --probe-external examples/scenarios/task_runner_demo.yaml
 just task-runner-demo
 ```
 
+## Use as a SUT for a2aproject/a2a-tck
+
+This agent can serve as the System Under Test for
+[a2aproject/a2a-tck](https://github.com/a2aproject/a2a-tck):
+
+```bash
+git clone https://github.com/a2aproject/a2a-tck.git
+cd a2a-tck
+uv venv && source .venv/bin/activate
+uv pip install -e .
+
+./run_tck.py --sut-url https://tasks.a2a-testbed.com --category all
+```
+
+Or from the testbed root, assuming a2a-tck is checked out as a
+sibling directory:
+
+```bash
+just tck-against-task-runner
+```
+
+Some tests fail because a2a-tck enforces A2A v0.3.0 mandatory
+surfaces — `tasks/list` pagination + filtering + history-length
+and multi-transport (gRPC + REST) equivalence — that this v1.0
+agent does not implement.
+
 ## License
 
 Apache 2.0.

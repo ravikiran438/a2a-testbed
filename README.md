@@ -319,6 +319,36 @@ change while the convention is being explored. Tests cover the core
 runtime, the manifest layer, and one end-to-end scenario; cross-SDK
 toolchains are exercised in `tests/polyglot/`.
 
+## Related projects
+
+| Project | What it does |
+|---|---|
+| [a2aproject/a2a-tck](https://github.com/a2aproject/a2a-tck) | Single-agent compliance validator. Local CLI, targets A2A v0.3.0. |
+| [a2aproject/a2a-inspector](https://github.com/a2aproject/a2a-inspector) | Interactive debugger UI for one agent at a time. Local launch. |
+| [a2aproject/a2a-samples](https://github.com/a2aproject/a2a-samples) | Reference sample agents in Python, JavaScript, Go, Java. |
+| [A2A-StoryLab](https://github.com/A2A-StoryLab/A2A-StoryLab) | Educational multi-agent demo (Orchestrator + Creator + Critic). |
+
+a2a-testbed targets A2A 1.0 and adds: multi-agent scenarios,
+network fault injection, virtual time, the extension manifest
+convention, and a hosted browser playground at
+<https://a2a-testbed.com>.
+
+The reference task-runner at
+[`examples/hosted-agents/cloudflare-task-runner/`](examples/hosted-agents/cloudflare-task-runner/),
+deployed at `https://tasks.a2a-testbed.com`, can also serve as the
+SUT for an a2a-tck run:
+
+```bash
+git clone https://github.com/a2aproject/a2a-tck.git
+cd a2a-tck
+uv venv && source .venv/bin/activate && uv pip install -e .
+./run_tck.py --sut-url https://tasks.a2a-testbed.com --category all
+```
+
+Some tests will fail because TCK enforces A2A v0.3.0 mandatory
+surfaces (notably `tasks/list` pagination + filtering and
+multi-transport equivalence) that this agent does not implement.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issues and pull requests

@@ -159,6 +159,27 @@ const REFERENCES: RefCard[] = [
     href: 'https://github.com/ai-boost/awesome-harness-engineering',
     role: 'The runtime layer below A2A',
   },
+  {
+    name: 'a2aproject/a2a-tck',
+    one_liner:
+      'Official Technology Compatibility Kit from the A2A project. ' +
+      'Single-agent compliance validator targeting A2A v0.3.0 with ' +
+      'multi-transport (JSON-RPC + gRPC + REST) equivalence testing. ' +
+      'The right tool for "is my agent A2A 1.0 compliant?" — this ' +
+      'testbed sits alongside it for multi-agent and extension testing.',
+    href: 'https://github.com/a2aproject/a2a-tck',
+    role: 'Single-agent compliance',
+  },
+  {
+    name: 'a2aproject/a2a-inspector',
+    one_liner:
+      'Official interactive debugger UI. Connect to one A2A endpoint, ' +
+      'browse its AgentCard, send messages from a chat panel, inspect ' +
+      'raw JSON-RPC in a console. Useful as a human-in-the-loop ' +
+      'companion to this testbed\'s scripted scenarios.',
+    href: 'https://github.com/a2aproject/a2a-inspector',
+    role: 'Interactive single-agent debugger',
+  },
 ];
 
 export function HomePage({ onOpen, onOpenBuiltin }: Props) {

@@ -28,6 +28,7 @@ import {
   findBuiltin,
   type BuiltinScenarioDef,
 } from './builtins';
+import { ALL_CONTRACTS } from './conformance/contracts';
 import { runConformanceSweep, summarize } from './conformance/runner';
 import type { ContractResult } from './conformance/types';
 import './App.css';
@@ -546,7 +547,7 @@ export default function App() {
   // Browser-side A2A 1.0 conformance results, keyed by external
   // agent URL. Populated after `runScenario` finishes for any
   // scenario that includes a `runtime: external` agent. Same
-  // 23 contracts the CLI's `conformance` command runs.
+  // contract suite the CLI's `conformance` command runs.
   const [conformanceResults, setConformanceResults] = useState<
     Map<string, ContractResult[]>
   >(() => new Map());
@@ -823,7 +824,7 @@ export default function App() {
     setActiveStep(null);
     setPhase('done');
 
-    // Conformance sweep — same 23 contracts the CLI's `conformance`
+    // Conformance sweep — same contracts the CLI's `conformance`
     // command runs, ported to TS so the static playground can do
     // it without a backend. Off-loop after the scenario animation
     // so the run summary appears immediately and the sweep
@@ -1228,7 +1229,7 @@ export default function App() {
                   <h3>A2A 1.0 conformance</h3>
                   {conformanceRunning && (
                     <div className="conformance-running">
-                      Running 23-contract sweep against{' '}
+                      Running {ALL_CONTRACTS.length}-contract sweep against{' '}
                       {activeScenario.externalUrls.length}{' '}
                       external agent
                       {activeScenario.externalUrls.length === 1 ? '' : 's'}…
@@ -1238,7 +1239,7 @@ export default function App() {
                     <div className="conformance-pending">
                       Click <strong>Run scenario</strong> to drive the
                       flow AND run the spec-derived contract sweep
-                      against this agent. Same 23 contracts the CLI's{' '}
+                      against this agent. Same {ALL_CONTRACTS.length} contracts the CLI's{' '}
                       <code>a2a-testbed conformance</code> command
                       runs; identical verdict.
                     </div>
