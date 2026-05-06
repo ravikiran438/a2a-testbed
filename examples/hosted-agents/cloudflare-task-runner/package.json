@@ -1,0 +1,17 @@
+{
+  "name": "a2a-cloudflare-task-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A2A 1.0 reference agent exercising the full task lifecycle: long-running tasks, SSE streaming, subscribe-to-task, and push notifications. Hosted on Cloudflare Workers.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.78.0"
+  }
+}

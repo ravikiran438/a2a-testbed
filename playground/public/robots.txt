@@ -1,0 +1,18 @@
+# a2a-testbed public crawl policy.
+#
+# The site is a single-page app at https://a2a-testbed.com/ . There
+# are no auth-walled pages, no user-generated content, and no
+# private routes — everything ships as static assets.
+#
+# We allow well-behaved crawlers everywhere, point them at the
+# sitemap, and ask aggressive crawlers (especially LLM scrapers
+# that don't honor sampling intent) to slow down. This isn't
+# enforcement — bots that ignore robots.txt still hit the site —
+# the Cloudflare layer in front of the live agent (CORS allowlist
+# + per-IP rate limit) is what actually defends the LLM endpoint.
+
+User-agent: *
+Allow: /
+Crawl-delay: 5
+
+Sitemap: https://a2a-testbed.com/sitemap.xml

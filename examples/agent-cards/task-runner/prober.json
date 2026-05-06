@@ -1,0 +1,25 @@
+{
+  "name": "Prober",
+  "description": "Originating agent that drives the task runner through its lifecycle. Runs in-process inside the testbed; never serves wire traffic.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "extensions": []
+  },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    {
+      "id": "drive",
+      "name": "Drive task lifecycle",
+      "description": "Sends a series of inputs to exercise the task runner's surface.",
+      "tags": ["test", "client"]
+    }
+  ]
+}

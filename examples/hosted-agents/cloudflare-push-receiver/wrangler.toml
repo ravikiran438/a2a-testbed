@@ -1,0 +1,46 @@
+# Companion to cloudflare-task-runner — captures the push
+# notifications a real A2A agent fires after a task completes,
+# so conformance tests can verify the webhook actually arrived.
+#
+# Endpoints:
+#   POST /webhook/<token>   — agent posts the completed Task here
+#   GET  /received/<token>  — test reads the captured payloads back
+#
+# Storage: a single KV namespace keyed by webhook token; entries
+# auto-expire after 1 hour to keep the namespace small.
+
+name = "a2a-push-receiver"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Disable the default `*.workers.dev` route in favor of a custom
+# domain on a2a-testbed.com so zone-level WAF rules apply. The
+# receiver is the most-exposed surface (CORS is open by necessity),
+# so it benefits most from being behind the WAF.
+workers_dev = false
+
+[[routes]]
+pattern = "push.a2a-testbed.com"
+custom_domain = true
+
+[observability]
+enabled = true
+
+# Per-IP rate limit. CORS is open here (the receiver must accept
+# webhooks from any agent's IP, so an allowlist isn't viable), so
+# this is the primary defense — anyone can POST junk and we don't
+# want them to burn the KV write budget. 60/min is generous for
+# legitimate agents firing one webhook per task completion.
+[[unsafe.bindings]]
+name = "RECEIVER_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 60, period = 60 }
+
+# Hooks expire after one hour to keep the namespace bounded; the
+# storage layer is KV so reads are consistent across isolates
+# (in-memory Map only survived single-isolate writes, which broke
+# tests that read from a different isolate).
+[[kv_namespaces]]
+binding = "RECEIVED"
+id = "c653589eb22d4ff1bcfcee2a44399ab8"

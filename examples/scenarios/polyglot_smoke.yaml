@@ -1,0 +1,40 @@
+# Polyglot smoke test using two in-process Python agents through the
+# multi-tenant sim-mode network. Subprocess scenarios that exercise
+# Go, Node.js, and Java runtimes live under tests/polyglot/ and
+# require the corresponding language toolchain on PATH.
+
+name: "polyglot smoke"
+description: |
+  Demonstrates the multi-runtime architecture. Sim mode runs both
+  agents in-process; cross-runtime subprocess scenarios use the
+  per-process realistic mode (see tests/polyglot/).
+
+mode: sim
+
+agents:
+  - id: alice
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+    role: principal
+  - id: bob
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+    role: service_provider
+
+flow:
+  - from: bob
+    to: alice
+    action: hello
+    message: "hello: ping"
+    expect:
+      response_status: "2xx"
+  - from: alice
+    to: bob
+    action: world
+    message: "world: pong"
+    expect:
+      response_status: "2xx"
+
+reports:
+  - format: json
+    path: reports/polyglot_smoke.json

@@ -1,0 +1,51 @@
+{
+  "name": "GroceryHelper",
+  "description": "Service-provider agent that handles service request requests. Declares all four protocol extensions; respects guardian routing for principally principals.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://ravikiran438.github.io/agent-consent-protocol/v1",
+        "description": "ACAP: requests consent before any action.",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/phala-protocol/v1",
+        "description": "Phala: emits welfare feedback after each delivery.",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/pratyahara-nerve/v1",
+        "description": "NERVE: publishes behavioral fingerprint for integrity verification.",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/sauvidya-pace/v1",
+        "description": "PACE: adapts interaction modality to the principal's PCP.",
+        "required": true
+      }
+    ]
+  },
+  "skills": [
+    {
+      "id": "deliver-groceries",
+      "name": "Deliver groceries",
+      "description": "Accepts service requests and arranges delivery, gated on guardian consent.",
+      "tags": ["service-provider", "service"]
+    },
+    {
+      "id": "request-consent",
+      "name": "Request consent for delivery",
+      "description": "Initiates a consent request that may route through the principal's guardian.",
+      "tags": ["consent-requestor"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"]
+}

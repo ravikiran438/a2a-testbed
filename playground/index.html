@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- .ico for legacy / Windows shortcuts (multi-res 16/32/48 from the bundle) -->
+    <link rel="icon" href="/a2a-logo/favicon.ico" sizes="any" />
+    <!-- SVG favicon for modern browsers — simplified mark, designed for
+         legibility at 16x16 / 32x32 (the full icon's detail collapses at
+         those sizes). -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Apple touch icon (iOS home-screen, 192px) — full-detail icon. -->
+    <link rel="apple-touch-icon" href="/a2a-logo/a2a-testbed-icon-192.png" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="In-browser playground for the a2a-testbed: multi-agent A2A scenarios and AgentCard validation."
+    />
+    <link rel="canonical" href="https://a2a-testbed.com/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta property="og:title" content="a2a-testbed" />
+    <meta
+      property="og:description"
+      content="Test A2A agent networks before you ship them — multi-agent scenarios, AgentCard validation, and live LLM agent checks in the browser."
+    />
+    <meta property="og:url" content="https://a2a-testbed.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="a2a-testbed" />
+    <meta
+      property="og:image"
+      content="https://a2a-testbed.com/a2a-logo/a2a-testbed-icon-192.png"
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="a2a-testbed" />
+    <meta
+      name="twitter:description"
+      content="Test A2A agent networks before you ship them. Live at a2a-testbed.com."
+    />
+    <meta
+      name="twitter:image"
+      content="https://a2a-testbed.com/a2a-logo/a2a-testbed-icon-192.png"
+    />
+    <!-- Structured data: tells search engines this is a free, browser-based
+         developer tool for the A2A protocol. Schema.org SoftwareApplication
+         is the right type for a hosted webapp; WebSite gives the canonical
+         URL/name pair search engines use for sitelinks. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://a2a-testbed.com/#website",
+            "url": "https://a2a-testbed.com/",
+            "name": "a2a-testbed",
+            "description": "In-browser playground for testing A2A multi-agent networks, validating AgentCards, and exercising live LLM-backed A2A agents.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "a2a-testbed",
+            "url": "https://a2a-testbed.com/",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Any (browser)",
+            "description": "Polyglot multi-agent testbed for the A2A protocol. Run scripted scenarios across Python, Go, Node.js, Java agents; validate AgentCards against published JSON Schema manifests; drive real LLM-backed agents from the browser with full expectation enforcement.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "license": "https://www.apache.org/licenses/LICENSE-2.0",
+            "codeRepository": "https://github.com/ravikiran438/a2a-testbed"
+          }
+        ]
+      }
+    </script>
+    <title>a2a-testbed — test A2A agent networks before you ship them</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

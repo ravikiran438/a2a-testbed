@@ -1,0 +1,35 @@
+<!--
+  Favicon variant: simplified for legibility at 16x16 / 32x32. Drops
+  the two A circles and letter glyphs from the full icon — at favicon
+  sizes those details collapse into a blur. Keeps the iconic gradient
+  arc (the agent-to-agent connection) and the green observer dot
+  below (the validator). Same dark tile + palette as the full icon,
+  so the visual identity is consistent at any size.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#1a1240"/>
+      <stop offset="100%" stop-color="#070514"/>
+    </radialGradient>
+    <linearGradient id="arc" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="50%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#d946ef"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark rounded tile (matches the lockup's icon background). -->
+  <rect width="64" height="64" rx="12" fill="url(#bg)"/>
+
+  <!-- The arc: agent <-> agent connection. Generous stroke so it
+       reads at 16x16. -->
+  <path d="M 16 36 Q 32 10 48 36"
+        stroke="url(#arc)"
+        stroke-width="5"
+        stroke-linecap="round"
+        fill="none"/>
+
+  <!-- Observer / validator dot below — green for "passing". -->
+  <circle cx="32" cy="48" r="5.5" fill="#a3e635"/>
+</svg>

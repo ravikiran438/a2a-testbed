@@ -1,0 +1,40 @@
+{
+  "name": "Alice",
+  "description": "Personal agent for an 88-year-old principal with mild cognitive decline. (unspecified language) primary, voice-first, hearing impaired. Authority delegated to guardian (bob).",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://ravikiran438.github.io/agent-consent-protocol/v1",
+        "description": "ACAP: usage-policy consent and per-action adherence (consent authority delegated to bob).",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/sauvidya-pace/v1",
+        "description": "PACE: principal accessibility and capacity ((unspecified language), voice-first, low cognitive load).",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/phala-protocol/v1",
+        "description": "Phala: principal-declared welfare feedback (with welfare-detector panel).",
+        "required": false
+      }
+    ]
+  },
+  "skills": [
+    {
+      "id": "receive-service-offers",
+      "name": "Receive service offers",
+      "description": "Receives service offers and routes them to the guardian for consent.",
+      "tags": ["principal", "consent-routing"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"]
+}

@@ -1,0 +1,87 @@
+# Three-party guardian-mediated consent scenario.
+#
+# Three Python in-process agents walk a multi-protocol flow. The
+# scenario runner enforces structural HTTP expectations on every
+# step; extension-specific expectation blocks (acap, phala, nerve,
+# pace) are recorded for downstream semantic validators that
+# delegate to each protocol's MCP server.
+
+name: "Three-party guardian-mediated consent"
+description: |
+  GroceryHelper requests consent to deliver groceries. The request is routed
+  through Alice's guardian Bob. After consent is granted, the delivery
+  proceeds with PACE-adapted interaction ((unspecified language), voice-first), NERVE
+  behavioral fingerprint verification, and a Phala welfare feedback emission.
+
+mode: sim
+
+agents:
+  - id: alice
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+    role: principal
+  - id: bob
+    card: ../agent-cards/three-party/bob.json
+    runtime: python_inproc
+    role: guardian
+  - id: carol
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+    role: service_provider
+
+flow:
+  - from: carol
+    to: alice
+    action: request_consent
+    message: "request_consent: deliver groceries today"
+    expect:
+      response_status: "2xx"
+      acap:
+        routes_to: bob
+        consent_authority: guardian
+
+  - from: alice
+    to: bob
+    action: forward_consent_request
+    message: "forward_consent_request: GroceryHelper wants to deliver"
+    expect:
+      response_status: "2xx"
+      acap:
+        delegation_chain: ["alice", "bob"]
+
+  - from: bob
+    to: carol
+    action: grant_consent
+    message: "grant_consent: approved, delivery permitted"
+    expect:
+      response_status: "2xx"
+      pace:
+        modality_matches_pcp: true
+        language: te
+
+  - from: carol
+    to: alice
+    action: deliver
+    message: "deliver: groceries on the way"
+    expect:
+      response_status: "2xx"
+      nerve:
+        behavioral_fingerprint_within_baseline: true
+
+  - from: alice
+    to: carol
+    action: feedback
+    message: "feedback: welfare positive, dignity preserved"
+    expect:
+      response_status: "2xx"
+      phala:
+        welfare_signal_emitted: true
+        bu_privacy_compliant: true
+
+reports:
+  - format: json
+    path: reports/three_party_consent.json
+  - format: markdown
+    path: reports/three_party_consent.md
+  - format: svg-badge
+    path: reports/three_party_consent.svg

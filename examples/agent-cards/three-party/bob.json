@@ -1,0 +1,35 @@
+{
+  "name": "Bob (Guardian)",
+  "description": "Adult delegate and registered guardian for principal alice. Has consent authority via ACAP governance-tiering extension.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://ravikiran438.github.io/agent-consent-protocol/v1",
+        "description": "ACAP: receives consent requests on behalf of principal alice.",
+        "required": true
+      },
+      {
+        "uri": "https://ravikiran438.github.io/sauvidya-pace/v1",
+        "description": "PACE: full capacity, no accommodations required.",
+        "required": false
+      }
+    ]
+  },
+  "skills": [
+    {
+      "id": "grant-consent",
+      "name": "Grant or deny consent on behalf of alice",
+      "description": "Reviews service offers routed from alice and decides whether to consent.",
+      "tags": ["guardian", "consent-grantor"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"]
+}

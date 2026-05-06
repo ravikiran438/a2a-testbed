@@ -1,0 +1,17 @@
+{
+  "name": "a2a-cloudflare-math-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A2A 1.0 compliant math agent backed by Groq's Llama API, hosted on Cloudflare Workers.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.78.0"
+  }
+}

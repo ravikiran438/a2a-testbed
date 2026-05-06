@@ -1,0 +1,12 @@
+{
+  "name": "a2a-testbed-nodejs-template",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Reference Node.js agent for the a2a-testbed subprocess runtime.",
+  "main": "index.js",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node index.js"
+  }
+}

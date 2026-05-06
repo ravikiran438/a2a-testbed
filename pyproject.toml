@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a2a-testbed"
+version = "0.1.0a1"
+description = "A polyglot, JSON-driven, multi-agent A2A network simulator with scenario runner, observer agents, time control, and failure injection."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Ravi Kiran Kadaboina" }]
+keywords = ["a2a", "agent-to-agent", "agent-protocol", "conformance", "testbed", "multi-agent", "polyglot"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "a2a-sdk[http-server]>=1.0.1",
+    "httpx>=0.28",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "starlette>=0.40",
+    "typer>=0.12",
+    "uvicorn>=0.34",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+a2a-testbed = "a2a_testbed.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/ravikiran438/a2a-testbed"
+Issues = "https://github.com/ravikiran438/a2a-testbed/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+a2a_testbed = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "polyglot: tests that spawn non-Python subprocess agents (skip if toolchain absent)",
+]
+
+# ----------------------------------------------------------------------
+# A2A spec sync metadata.
+#
+# This section is the single source of truth for *which* version of the
+# A2A specification this testbed's contracts were derived against.
+# Read at runtime by `a2a_testbed.spec_meta` and rendered by:
+#   - `a2a-testbed coverage` (which spec ↔ which commit ↔ how stale)
+#   - `a2a-testbed run --reports …` (compliance section header)
+#   - `a2a-testbed version` (visible cite)
+#
+# Updating this block is a deliberate process — see
+# CONTRIBUTING.md "Tracking the upstream A2A spec" for the
+# quarterly-review checklist.
+# ----------------------------------------------------------------------
+[tool.a2a_testbed.spec]
+name = "A2A"
+version = "1.0"
+# Pinned upstream commit. Increment via the CONTRIBUTING checklist;
+# never rebase forward without re-running the full contract sweep.
+commit = "ae6a562d5d972f2c4b184f748bb32e1fa9aa7bf2"
+# Human date when this commit pin was last reviewed against the
+# implemented contract suite. ISO 8601, UTC.
+last_reviewed = "2026-05-05"
+source_repo = "https://github.com/a2aproject/A2A"
+specification_path = "docs/specification.md"

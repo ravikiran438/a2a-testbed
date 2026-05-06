@@ -1,0 +1,56 @@
+# Cloudflare Workers configuration for the A2A math agent.
+#
+# Replace `name` if you'd like a different subdomain. After
+# `wrangler deploy`, your agent will be live at
+# https://<name>.<your-cloudflare-subdomain>.workers.dev/.
+#
+# The GROQ_API_KEY secret must be set before deployment:
+#   wrangler secret put GROQ_API_KEY
+#
+# Optional: pin a different Groq model via the GROQ_MODEL var below.
+# Free-tier-eligible Groq models include:
+#   - llama-3.3-70b-versatile      (default, accurate, ~30 req/min)
+#   - llama-3.1-8b-instant         (faster, smaller, higher rate)
+#   - llama-3.1-70b-versatile      (legacy, may be deprecated)
+
+name = "a2a-math-agent"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Disable the default `*.workers.dev` route. workers.dev URLs are
+# on Cloudflare's shared zone where customers can't add WAF rules,
+# zone-level rate limits, or custom transform rules — only the
+# baked-in defenses (Bot Fight Mode, this worker's own RateLimit
+# binding) apply. Routing through a custom domain on our own zone
+# unlocks the full Cloudflare security feature set.
+workers_dev = false
+
+# Bind the worker to a subdomain on a2a-testbed.com (already on
+# this Cloudflare account, so DNS + cert provision automatically).
+[[routes]]
+pattern = "math.a2a-testbed.com"
+custom_domain = true
+
+[vars]
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+[observability]
+enabled = true
+
+# Per-IP rate limit. Defends the Groq token budget from runaway
+# bots and from cross-origin abuse (CORS only blocks browsers; CLI
+# bots ignore CORS, so this layer is what actually caps cost).
+#
+#   key:    `cf-connecting-ip` of the requester (set by Cloudflare).
+#   limit:  number of requests allowed in the window.
+#   period: 10 or 60 (seconds) — the only values the binding accepts.
+#
+# Tuning: a normal playground run is 3 requests; 30/min lets users
+# re-run and tab-juggle without throttling while still capping a
+# single IP to ~30 LLM calls per minute. Bump this if the demo
+# grows; lower it if you see abuse in Cloudflare Workers analytics.
+[[unsafe.bindings]]
+name = "MATH_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

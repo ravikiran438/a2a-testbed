@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  a2a-testbed sitemap.
+
+  The playground is a single-page app — Home / Scenario / Validator
+  are mode toggles rendered from one URL, not separate routes —
+  so the canonical site has exactly one entry. The GitHub repo and
+  the per-protocol docs sites are listed under their own domains
+  and aren't ours to claim here.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://a2a-testbed.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

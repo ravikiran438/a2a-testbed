@@ -1,0 +1,52 @@
+# Cloudflare Workers configuration for the A2A reference task runner.
+#
+# Replace `name` for a different subdomain. After `wrangler deploy`,
+# the worker is live at https://<name>.<your-cf-subdomain>.workers.dev/.
+#
+# Storage: a single global Durable Object (`TaskRunnerDO`) owns
+# every task + push config. DO storage has no daily write cap; the
+# previous KV design hit the free-tier 1K/day write quota during
+# iterative testing.
+
+name = "a2a-task-runner"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Disable the default `*.workers.dev` route in favor of a custom
+# domain on a2a-testbed.com — workers.dev URLs can't have zone-level
+# WAF rules, so we lose Cloudflare's full security toolkit if traffic
+# hits the default subdomain.
+workers_dev = false
+
+[[routes]]
+pattern = "tasks.a2a-testbed.com"
+custom_domain = true
+
+[vars]
+# Maximum number of "work units" a task may be asked to perform.
+# Each unit corresponds to one streamed status update + one
+# in-task delay (50ms by default), so a count of 10 produces a
+# ~500ms task with 10 SSE events.
+MAX_WORK_UNITS = "20"
+
+[observability]
+enabled = true
+
+# Per-IP rate limit. CORS only blocks browsers, so this caps
+# server-side abuse of the public endpoint. 60/min/IP is generous
+# for legitimate exercise.
+[[unsafe.bindings]]
+name = "TASK_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }
+
+# Single global Durable Object holds tasks + push configs in
+# transactional storage.
+[[durable_objects.bindings]]
+name = "TASK_RUNNER"
+class_name = "TaskRunnerDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TaskRunnerDO"]

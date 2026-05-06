@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480">
+  <defs>
+    <clipPath id="tc"><rect width="480" height="480" rx="100"/></clipPath>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#1a1240"/>
+      <stop offset="100%" stop-color="#070514"/>
+    </radialGradient>
+    <linearGradient id="arc" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="50%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#d946ef"/>
+    </linearGradient>
+    <pattern id="bb" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="1.6" fill="#ffffff" opacity="0.06"/>
+    </pattern>
+    <marker id="aS" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="strokeWidth" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+    </marker>
+    <marker id="aE" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="strokeWidth" markerWidth="4.5" markerHeight="4.5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d946ef"/>
+    </marker>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g clip-path="url(#tc)">
+    <rect width="480" height="480" fill="url(#bg)"/>
+    <rect width="480" height="480" fill="url(#bb)"/>
+  </g>
+  <line x1="181" y1="245" x2="226" y2="326" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="4 5" opacity="0.35"/>
+  <line x1="299" y1="245" x2="254" y2="326" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="4 5" opacity="0.35"/>
+  <circle cx="155" cy="200" r="52" fill="none" stroke="#f8fafc" stroke-width="6"/>
+  <text x="155" y="220" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#f8fafc" text-anchor="middle">A</text>
+  <circle cx="325" cy="200" r="52" fill="none" stroke="#f8fafc" stroke-width="6"/>
+  <text x="325" y="220" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#f8fafc" text-anchor="middle">A</text>
+  <path d="M 181 155 Q 240 80 299 155" stroke="url(#arc)" stroke-width="7" fill="none" stroke-linecap="round" filter="url(#glow)" marker-start="url(#aS)" marker-end="url(#aE)"/>
+  <circle cx="240" cy="340" r="22" fill="#a3e635" filter="url(#glow)"/>
+  <path d="M 229 340 L 237 348 L 252 332" stroke="#070514" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

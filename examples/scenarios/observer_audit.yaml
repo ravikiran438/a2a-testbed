@@ -1,0 +1,49 @@
+# Observer audit demo: a passive observer agent watches all traffic
+# without sitting on the message path. Useful for audit trails,
+# behavioral integrity checks, and cross-agent invariants.
+#
+# The runner records every wire exchange in the observer's history;
+# semantic validators (e.g. behavioral-fingerprint drift detection)
+# can be plugged in by registering a callback on the observer hub.
+
+name: "observer audit demo"
+description: |
+  Three agents (caller, callee, observer). The observer is declared with
+  role=observer; it doesn't appear in the message flow but receives a
+  traffic tap of every wire exchange via the testbed's observer hub.
+
+mode: sim
+
+agents:
+  - id: caller
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+  - id: callee
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+  - id: nerve_observer
+    card: ../agent-cards/three-party/bob.json
+    runtime: python_inproc
+    role: observer
+
+flow:
+  - from: caller
+    to: callee
+    action: request_consent
+    message: "request_consent: please approve"
+    expect:
+      response_status: "2xx"
+
+  - from: callee
+    to: caller
+    action: respond
+    message: "respond: ok"
+    expect:
+      response_status: "2xx"
+
+  - kind: observe
+    from: nerve_observer
+
+reports:
+  - format: markdown
+    path: reports/observer_audit.md

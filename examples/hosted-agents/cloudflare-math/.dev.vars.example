@@ -1,0 +1,6 @@
+# Copy to `.dev.vars` for local `wrangler dev` runs.
+# For production, use `wrangler secret put GROQ_API_KEY` instead —
+# secrets put through `wrangler secret` are encrypted in Cloudflare's
+# control plane and aren't checked in.
+
+GROQ_API_KEY=gsk_your_groq_api_key_here

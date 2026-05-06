@@ -1,0 +1,50 @@
+# Time advance demo: deterministic clock for testing TTLs / refresh cadences.
+#
+# Yathartha's probe-battery refresh, ACAP's escalation TTL, Phala's welfare
+# horizons, and PACE's interaction time-windows all depend on time advancing.
+# In production that's wall-clock; in tests we advance virtual time on demand.
+
+name: "time advance demo"
+description: |
+  Demonstrates the abstract time controller. Steps with kind=advance_time
+  move the virtual clock forward by `advance_seconds`; in-process agents
+  read the controller instead of `datetime.now()`.
+
+mode: sim
+
+agents:
+  - id: agent_a
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+
+flow:
+  - from: agent_a
+    to: agent_a
+    action: tick_now
+    message: "tick_now: at virtual epoch"
+    expect:
+      response_status: "2xx"
+
+  - kind: advance_time
+    advance_seconds: 3600         # +1 hour
+
+  - from: agent_a
+    to: agent_a
+    action: tick_after_hour
+    message: "tick_after_hour: one virtual hour later"
+    expect:
+      response_status: "2xx"
+
+  - kind: advance_time
+    advance_seconds: 86400        # +1 day
+
+  - from: agent_a
+    to: agent_a
+    action: tick_after_day
+    message: "tick_after_day: one virtual day later"
+    expect:
+      response_status: "2xx"
+
+reports:
+  - format: markdown
+    path: reports/time_advance.md

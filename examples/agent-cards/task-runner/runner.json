@@ -1,0 +1,27 @@
+{
+  "name": "Task Runner",
+  "description": "A2A 1.0 reference agent exercising the full task lifecycle: streaming SSE, tasks/get/list/cancel, tasks/resubscribe, and push notifications. Echoes input over N work units (default 5).",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "https://tasks.a2a-testbed.com",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": true,
+    "extensions": []
+  },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    {
+      "id": "echo_over_time",
+      "name": "Echo over time",
+      "description": "Accept any text input and emit N artifact updates spaced 50ms apart, then complete the task.",
+      "tags": ["task", "streaming", "demo"]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+# End-to-end demo: live A2A 1.0 reference task runner on Cloudflare Workers.
+#
+# The task-runner agent at examples/hosted-agents/cloudflare-task-runner/
+# exercises every Task / SSE / push primitive the spec defines. Run with
+# `--probe-external` to also fire the full transport-contract sweep
+# (~58 contracts) against the live deployment.
+
+name: "Task runner agent — live A2A lifecycle"
+description: |
+  Drives a real A2A 1.0 reference agent through the full task
+  lifecycle (Tasks via message/send, SSE streaming, tasks/get,
+  tasks/cancel, push notifications). Demonstrates that the testbed
+  validates an end-to-end-conformant agent across every spec surface.
+
+mode: realistic
+
+agents:
+  - id: prober
+    card: ../agent-cards/task-runner/prober.json
+    runtime: python_inproc
+    role: principal
+
+  - id: runner
+    card: ../agent-cards/task-runner/runner.json
+    runtime: external
+    url: https://tasks.a2a-testbed.com
+    role: service_provider
+
+flow:
+  - from: prober
+    to: runner
+    action: ask
+    message: "count: 3 hello task runner"
+    expect:
+      response_status: "2xx"
+      response_contains: '"state":"TASK_STATE_COMPLETED"'
+
+  - from: prober
+    to: runner
+    action: ask
+    message: "count: 5 second task"
+    expect:
+      response_status: "2xx"
+      response_contains: '"state":"TASK_STATE_COMPLETED"'
+
+reports:
+  - format: json
+    path: reports/task_runner_demo.json
+  - format: markdown
+    path: reports/task_runner_demo.md

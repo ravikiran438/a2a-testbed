@@ -1,0 +1,75 @@
+# Fault injection demo: drop, delay, corrupt, and synthetic HTTP error.
+# Each step deliberately fails or warps to demonstrate the testbed's
+# failure-injection seam. The scenario expects ALL of these to "fail"
+# in their respective ways, so a healthy run logs the fault details
+# and records the right status.
+
+name: "fault injection demo"
+description: |
+  Exercises every supported fault kind. Useful as a smoke test for
+  the fault layer and as a demonstration for protocol authors who
+  want to validate behavior under wire-level anomalies.
+
+mode: sim
+
+agents:
+  - id: caller
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+  - id: callee
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+
+flow:
+  # 1) No fault - baseline ack
+  - from: caller
+    to: callee
+    action: hello
+    message: "hello: baseline"
+    expect:
+      response_status: "2xx"
+
+  # 2) Drop - request never reaches the agent
+  - from: caller
+    to: callee
+    action: drop_test
+    message: "drop_test: client should never see a response"
+    fault:
+      kind: drop
+
+  # 3) Delay - request arrives but takes 250 ms
+  - from: caller
+    to: callee
+    action: delay_test
+    message: "delay_test: arrives slow"
+    fault:
+      kind: delay
+      delay_ms: 250
+    expect:
+      response_status: "2xx"
+
+  # 4) Corrupt - body is mutated before send
+  - from: caller
+    to: callee
+    action: corrupt_test
+    message: "corrupt_test: body will be scrambled"
+    fault:
+      kind: corrupt
+      corrupt_pattern: "scrambled"
+
+  # 5) HTTP error - synthetic 503 without contacting the agent
+  - from: caller
+    to: callee
+    action: http_503
+    message: "http_503: client sees synthetic 5xx"
+    fault:
+      kind: http_error
+      http_status: 503
+    expect:
+      response_status: "5xx"
+
+reports:
+  - format: json
+    path: reports/fault_injection.json
+  - format: markdown
+    path: reports/fault_injection.md

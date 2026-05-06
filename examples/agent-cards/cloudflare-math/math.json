@@ -1,0 +1,26 @@
+{
+  "name": "Math Agent",
+  "description": "Answers arithmetic and short word-math problems via Llama 3.3 (Groq) in JSON mode. Returns a deterministic JSON envelope so clients can extract the numeric answer programmatically.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "https://math.a2a-testbed.com"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extensions": []
+  },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    {
+      "id": "answer_math",
+      "name": "Answer a math question",
+      "description": "Accepts an arithmetic expression or a short word problem; returns a JSON object with `answer` (number or null) and `explanation` (one-sentence rationale).",
+      "tags": ["math", "json"]
+    }
+  ]
+}

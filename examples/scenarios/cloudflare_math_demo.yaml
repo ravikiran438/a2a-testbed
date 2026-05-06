@@ -1,0 +1,75 @@
+# End-to-end demo: live LLM-backed math agent.
+#
+# Prerequisite: the worker at examples/hosted-agents/cloudflare-math/
+# has been deployed (see its README). Live at
+# https://math.a2a-testbed.com — custom-domain-routed so zone-level
+# WAF rules apply.
+#
+# Each step sends a real arithmetic question, the worker calls Groq's
+# Llama 3.3 in JSON mode, and the scenario runner checks that the
+# response body contains the exact `"answer": <N>` field. Because the
+# agent is constrained to JSON output, these checks are deterministic.
+
+name: "Cloudflare math agent — live JSON checks"
+description: |
+  Drives a real LLM-backed A2A agent over HTTP+JSON-RPC and asserts
+  structured response fields. Demonstrates that the testbed verifies
+  semantic correctness against deployed agents, not just syntax.
+
+mode: realistic
+
+agents:
+  # The prober runs in-process inside the scenario runner; it's just
+  # the labelled originator of every message. It never serves wire
+  # traffic, so any minimal AgentCard JSON satisfies the schema.
+  - id: prober
+    card: ../agent-cards/cloudflare-math/prober.json
+    runtime: python_inproc
+    role: principal
+
+  # The math agent is a real Cloudflare Worker. `card:` is the local
+  # AgentCard the testbed checks against; `url:` is where messages
+  # actually get sent. Update the `url` (and the embedded URL inside
+  # `math.json`) if you redeploy under a different Cloudflare
+  # subdomain.
+  - id: math
+    card: ../agent-cards/cloudflare-math/math.json
+    runtime: external
+    url: https://math.a2a-testbed.com
+    role: service_provider
+
+flow:
+  # Note on matcher form: the worker's reply is a JSON object
+  # carried as a string inside the outer JSON-RPC envelope, so the
+  # raw HTTP body contains escape-quoted keys (e.g. \"answer\": 84).
+  # The testbed substring-matches against that raw body, so the
+  # matchers below use the escaped form.
+  - from: prober
+    to: math
+    action: ask
+    message: "What is 12 * 7?"
+    expect:
+      response_status: "2xx"
+      response_contains: '\"answer\": 84'
+
+  - from: prober
+    to: math
+    action: ask
+    message: "Compute (15 + 9) / 3."
+    expect:
+      response_status: "2xx"
+      response_contains: '\"answer\": 8'
+
+  - from: prober
+    to: math
+    action: ask
+    message: "If Alice has 12 apples and Bob gives her 5 more, how many apples does Alice have?"
+    expect:
+      response_status: "2xx"
+      response_contains: '\"answer\": 17'
+
+reports:
+  - format: json
+    path: reports/cloudflare_math_demo.json
+  - format: markdown
+    path: reports/cloudflare_math_demo.md

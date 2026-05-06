@@ -1,0 +1,25 @@
+{
+  "name": "Prober",
+  "description": "Originating agent that sends arithmetic questions to the math agent. Runs in-process inside the testbed; never serves wire traffic.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "extensions": []
+  },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    {
+      "id": "ask",
+      "name": "Ask a question",
+      "description": "Sends a math question and reads the structured JSON answer.",
+      "tags": ["test", "client"]
+    }
+  ]
+}
