@@ -1479,6 +1479,35 @@
   border-radius: 3px;
 }
 
+/* Advance-time banner. Shows briefly while an `advance_time` step
+   is the active step in the run loop, then clears. Sits inline
+   above the canvas, same pattern as the live-scenario banner. */
+.advance-time-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px 0;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #faf5ff 0%, #f3e8ff 100%);
+  border: 1px solid #c084fc;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #581c87;
+  line-height: 1.45;
+  animation: advance-time-fade-in 0.18s ease-out;
+}
+.advance-time-banner .advance-time-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.advance-time-banner .advance-time-text strong {
+  color: #4c1d95;
+}
+@keyframes advance-time-fade-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ---------------------------------------------------------------------- */
 /* Built-in scenario dropdown                                             */
 /* ---------------------------------------------------------------------- */

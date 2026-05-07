@@ -63,12 +63,17 @@ export interface LoadedScenario {
 }
 
 export interface LoadedStep {
+  /** Step kind. 'message' is the default. 'advance_time' renders
+   *  as a virtual-clock banner with no from/to edge. */
+  kind?: 'message' | 'advance_time';
   from: string;
   to: string;
   action: string;
   message?: string;
   expect?: Record<string, unknown>;
   duration_ms: number;
+  /** Set on 'advance_time' steps. */
+  advance_seconds?: number;
 }
 
 export class ScenarioLoadError extends Error {}
@@ -173,13 +178,33 @@ export function parseScenarioYaml(
     const action = s.action;
 
     // Non-message step. CLI YAMLs use a `kind:` field for things
-    // that aren't agent-to-agent messages — e.g. `kind: observe`
-    // (passive recorder tick) or `kind: advance_time` (virtual
-    // clock advance). Steps missing `from` or `to` are also
-    // non-messages by definition. The browser visualizes wire
-    // traffic only, so we count and skip these and report a
-    // tally to the user.
+    // that aren't agent-to-agent messages. The playground renders
+    // 'advance_time' as a banner overlay (virtual clock advance);
+    // every other kind ('observe' etc.) is counted and skipped
+    // because the browser visualizes wire traffic only.
     const declaredKind = typeof s.kind === 'string' ? s.kind : null;
+
+    if (declaredKind === 'advance_time') {
+      const seconds = typeof s.advance_seconds === 'number'
+        ? s.advance_seconds
+        : 0;
+      // Default banner duration: 1.2s, longer than the 0.9s
+      // message edge so the visual reads as a deliberate pause.
+      const duration_ms =
+        typeof s.duration_ms === 'number' && s.duration_ms > 0
+          ? s.duration_ms
+          : 1200;
+      steps.push({
+        kind: 'advance_time',
+        from: '',
+        to: '',
+        action: 'advance_time',
+        duration_ms,
+        advance_seconds: seconds,
+      });
+      return;
+    }
+
     const isNonMessageStep = declaredKind !== null || !to || !from;
     if (isNonMessageStep) {
       skippedNonMessageSteps += 1;
@@ -315,21 +340,40 @@ export function layoutAgents(count: number): NodePosition[] {
  * expectations alongside a "not enforced in browser" note.
  */
 export function adaptSteps(loaded: LoadedScenario): ScenarioStep[] {
-  return loaded.steps.map((s) => ({
-    from: s.from,
-    to: s.to,
-    action: s.action,
-    extension_uri: '',
-    outcome: 'ok' as const,
-    duration_ms: s.duration_ms,
-    message: {
-      kind: 'a2a.message',
-      from_agent: s.from,
-      to_agent: s.to,
+  return loaded.steps.map((s) => {
+    if (s.kind === 'advance_time') {
+      return {
+        kind: 'advance_time' as const,
+        from: '',
+        to: '',
+        action: 'advance_time',
+        extension_uri: '',
+        outcome: 'ok' as const,
+        duration_ms: s.duration_ms,
+        message: {
+          kind: 'a2a.advance_time',
+          advance_seconds: s.advance_seconds ?? 0,
+        },
+        advance_seconds: s.advance_seconds,
+      };
+    }
+    return {
+      kind: 'message' as const,
+      from: s.from,
+      to: s.to,
       action: s.action,
-      ...(s.message ? { content: s.message } : {}),
-    },
-    expect: s.expect,
-    // validation: intentionally omitted for custom scenarios.
-  }));
+      extension_uri: '',
+      outcome: 'ok' as const,
+      duration_ms: s.duration_ms,
+      message: {
+        kind: 'a2a.message',
+        from_agent: s.from,
+        to_agent: s.to,
+        action: s.action,
+        ...(s.message ? { content: s.message } : {}),
+      },
+      expect: s.expect,
+      // validation: intentionally omitted for custom scenarios.
+    };
+  });
 }

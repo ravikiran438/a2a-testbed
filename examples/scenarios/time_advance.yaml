@@ -1,14 +1,19 @@
-# Time advance demo: deterministic clock for testing TTLs / refresh cadences.
+# Time advance demo: deterministic clock for testing scheduled work
+# that fires on cron-style intervals (cache TTL refreshes, daily
+# rollup jobs, hourly heartbeats, etc.).
 #
-# Yathartha's probe-battery refresh, ACAP's escalation TTL, Phala's welfare
-# horizons, and PACE's interaction time-windows all depend on time advancing.
-# In production that's wall-clock; in tests we advance virtual time on demand.
+# Without virtual time, testing these would require real-time waits
+# ("sleep 3600 to verify the hourly task fires"). The testbed's
+# TimeController lets a scenario advance the clock explicitly so the
+# same test runs in milliseconds instead of hours.
 
-name: "time advance demo"
+name: "scheduled work over virtual time"
 description: |
-  Demonstrates the abstract time controller. Steps with kind=advance_time
-  move the virtual clock forward by `advance_seconds`; in-process agents
-  read the controller instead of `datetime.now()`.
+  A single agent runs scheduled work that triggers on time
+  intervals: a boot-time health check, an hourly cache refresh, and
+  a daily maintenance rollup. `advance_time` steps move the virtual
+  clock forward between triggers; in-process agents read the
+  controller instead of `datetime.now()`.
 
 mode: sim
 
@@ -16,32 +21,33 @@ agents:
   - id: agent_a
     card: ../agent-cards/three-party/carol.json
     runtime: python_inproc
+    role: scheduler
 
 flow:
   - from: agent_a
     to: agent_a
-    action: tick_now
-    message: "tick_now: at virtual epoch"
+    action: boot_health_check
+    message: "boot health-check at virtual epoch"
     expect:
       response_status: "2xx"
 
   - kind: advance_time
-    advance_seconds: 3600         # +1 hour
+    advance_seconds: 3600         # +1 hour: hourly cron fires
 
   - from: agent_a
     to: agent_a
-    action: tick_after_hour
-    message: "tick_after_hour: one virtual hour later"
+    action: cache_refresh
+    message: "hourly cache TTL hit; agent refreshes its cache"
     expect:
       response_status: "2xx"
 
   - kind: advance_time
-    advance_seconds: 86400        # +1 day
+    advance_seconds: 86400        # +1 day: daily cron fires
 
   - from: agent_a
     to: agent_a
-    action: tick_after_day
-    message: "tick_after_day: one virtual day later"
+    action: daily_rollup
+    message: "daily rollup job; agent runs end-of-day maintenance"
     expect:
       response_status: "2xx"
 

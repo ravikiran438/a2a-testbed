@@ -395,9 +395,28 @@ function makeNodesFor(
   }));
 }
 
+function formatVirtualTimeDelta(seconds: number): string {
+  if (seconds <= 0) return '0 seconds';
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  if (seconds < 3600) {
+    const m = Math.round(seconds / 60);
+    return `${m} minute${m === 1 ? '' : 's'}`;
+  }
+  if (seconds < 86400) {
+    const h = Math.round(seconds / 3600);
+    return `${h} hour${h === 1 ? '' : 's'}`;
+  }
+  const d = Math.round(seconds / 86400);
+  return `${d} day${d === 1 ? '' : 's'}`;
+}
+
 function makeEdgesFor(active: ActiveScenario, includeObserver: boolean): Edge[] {
   const messageEdges = active.steps
     .map((step, idx) => ({ step, idx }))
+    // advance_time steps render as a banner overlay (handled in the
+    // run loop), not as a from→to edge. Filter them out of the
+    // edge list so the canvas doesn't try to draw a phantom curve.
+    .filter(({ step }) => step.kind !== 'advance_time')
     .filter(({ step }) => includeObserver || !isObserverStep(step))
     .map(({ step, idx }) => ({
       id: `e${idx}-${step.from}-${step.to}`,
@@ -556,6 +575,13 @@ export default function App() {
     Map<string, ContractResult[]>
   >(() => new Map());
   const [conformanceRunning, setConformanceRunning] = useState(false);
+  // Banner shown while an advance_time step is active. Carries the
+  // virtual-clock delta in seconds so the UI can format it as
+  // "+1 hour" / "+1 day" / etc. Cleared between steps.
+  const [advanceTimeBanner, setAdvanceTimeBanner] = useState<{
+    stepIndex: number;
+    seconds: number;
+  } | null>(null);
   // Per-URL index of the next contract to run. Drives the chunked
   // "Run next batch" flow — sweeping all 58 in one burst can trip
   // an external agent's per-IP rate limit, so the user paces it.
@@ -771,7 +797,10 @@ export default function App() {
         let state: 'idle' | 'sending' | 'receiving' | 'done' = 'idle';
         if (activeStep !== null) {
           const step = activeScenario.steps[activeStep];
-          if (step) {
+          // advance_time steps don't have a from/to, so no node
+          // gets a sending/receiving highlight; they read as a
+          // pause across the canvas, not a wire exchange.
+          if (step && step.kind !== 'advance_time') {
             if (node.id === step.from) state = 'sending';
             else if (node.id === step.to) state = 'receiving';
           }
@@ -800,6 +829,24 @@ export default function App() {
       if (!showObserver && isObserverStep(step)) continue;
 
       setActiveStep(i);
+
+      // advance_time steps: surface a banner with the virtual-clock
+      // delta, hold for duration_ms, then move on. No HTTP, no
+      // edge animation. The banner clears after the step completes.
+      if (step.kind === 'advance_time') {
+        setAdvanceTimeBanner({
+          stepIndex: i,
+          seconds: step.advance_seconds ?? 0,
+        });
+        await new Promise((r) => setTimeout(r, step.duration_ms));
+        setAdvanceTimeBanner(null);
+        setCompleted((s) => {
+          const next = new Set(s);
+          next.add(i);
+          return next;
+        });
+        continue;
+      }
 
       const target = agentById.get(step.to);
       const isExternal =
@@ -914,15 +961,23 @@ export default function App() {
       activeScenario.steps
         .map((s, i) => ({ s, i }))
         .filter(({ s }) => showObserver || !isObserverStep(s))
-        .map(({ s, i }, displayIdx) => ({
-          index: i,
-          text: `${displayIdx + 1}. ${s.from} → ${s.to}: ${s.action}`,
-          status: completed.has(i)
-            ? 'done'
-            : i === activeStep
-            ? 'firing'
-            : 'pending',
-        })),
+        .map(({ s, i }, displayIdx) => {
+          const text =
+            s.kind === 'advance_time'
+              ? `${displayIdx + 1}. virtual time +${formatVirtualTimeDelta(
+                  s.advance_seconds ?? 0,
+                )}`
+              : `${displayIdx + 1}. ${s.from} → ${s.to}: ${s.action}`;
+          return {
+            index: i,
+            text,
+            status: completed.has(i)
+              ? 'done'
+              : i === activeStep
+              ? 'firing'
+              : 'pending',
+          };
+        }),
     [activeStep, completed, showObserver, activeScenario]
   );
 
@@ -1215,6 +1270,23 @@ export default function App() {
                   </div>
                 );
               })()}
+              {advanceTimeBanner && (
+                <div
+                  className="advance-time-banner"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="advance-time-icon" aria-hidden="true">
+                    ⏱
+                  </span>
+                  <span className="advance-time-text">
+                    Virtual time advanced by{' '}
+                    <strong>
+                      {formatVirtualTimeDelta(advanceTimeBanner.seconds)}
+                    </strong>
+                  </span>
+                </div>
+              )}
               <ReactFlow
                 nodes={nodes}
                 edges={edges}

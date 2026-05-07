@@ -127,9 +127,20 @@ export const agentCards: Record<string, AgentCard> = {
 };
 
 export interface ScenarioStep {
+  /** Step kind. Defaults to 'message' when omitted (backward
+   *  compatible with the bundled three-party scenario, which only
+   *  has message edges). 'advance_time' renders as a virtual-clock
+   *  banner instead of a from→to edge. */
+  kind?: 'message' | 'advance_time';
+  /** Required for 'message' steps; absent for 'advance_time'. */
   from: string;
   to: string;
   action: string;
+  /** Set on 'advance_time' steps; the seconds the virtual clock
+   *  advances at this step. The browser doesn't run agents, so
+   *  this value is shown for documentary purposes; the CLI runner
+   *  is what actually moves the clock. */
+  advance_seconds?: number;
   // Neutral identifier the inspector renders; the canvas does not
   // dispatch on this value.
   extension_uri: string;

@@ -17,6 +17,8 @@ import cloudflareMathMathCard from '../../../examples/agent-cards/cloudflare-mat
 import taskRunnerYaml from '../../../examples/scenarios/task_runner_demo.yaml?raw';
 import taskRunnerProberCard from '../../../examples/agent-cards/task-runner/prober.json?raw';
 import taskRunnerRunnerCard from '../../../examples/agent-cards/task-runner/runner.json?raw';
+import timeAdvanceYaml from '../../../examples/scenarios/time_advance.yaml?raw';
+import timeAdvanceCarolCard from '../../../examples/agent-cards/three-party/carol.json?raw';
 
 /** A built-in scenario the user can pick from the playground dropdown. */
 export interface BuiltinScenarioDef {
@@ -68,6 +70,21 @@ export const BUILTIN_SCENARIOS: BuiltinScenarioDef[] = [
       'runner.json': taskRunnerRunnerCard,
     },
     runtimeKind: 'external',
+  },
+  {
+    id: 'time-advance',
+    label: 'Scheduled work (virtual time, cron-style)',
+    description:
+      'A single agent runs scheduled work (boot health check, hourly ' +
+      'cache refresh, daily rollup) over virtual time. `advance_time` ' +
+      'steps fast-forward the clock between triggers so a 1-day cron ' +
+      'sequence runs in milliseconds. Demonstrates the testbed time ' +
+      'controller without waiting in real time.',
+    yaml: timeAdvanceYaml,
+    cards: {
+      'carol.json': timeAdvanceCarolCard,
+    },
+    runtimeKind: 'simulated',
   },
 ];
 
