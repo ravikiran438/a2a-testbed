@@ -25,6 +25,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # Node + Go let the polyglot subprocess tests run instead of skip.
+      # Both setup actions are first-party and free on public-repo runners.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
       - name: Install (editable + dev extras)
         run: python -m pip install -e ".[dev]"
       - name: Ruff lint
