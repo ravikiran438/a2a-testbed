@@ -1,5 +1,7 @@
 # a2a-testbed
 
+[![CI](https://github.com/ravikiran438/a2a-testbed/actions/workflows/ci.yml/badge.svg)](https://github.com/ravikiran438/a2a-testbed/actions/workflows/ci.yml)
+
 **Live at [a2a-testbed.com](https://a2a-testbed.com)** · CLI on
 [GitHub](https://github.com/ravikiran438/a2a-testbed) · Apache 2.0
 
@@ -45,6 +47,9 @@ capabilities:
   exchanges only).
 - Validate `capabilities.extensions[]` payloads against published
   JSON-Schema manifests.
+- Validate **Agent Control Specification (ACS)** manifests and map their
+  runtime-control checkpoints onto the A2A wire seam, with fail-closed
+  checks — offline (CLI) and in-browser. See [docs/ACS.md](docs/ACS.md).
 
 ## Quick start
 
@@ -89,6 +94,26 @@ a2a-testbed manifest generate \
   --version 1.0.0 \
   --ref-class my_protocol.types:MyServiceRef \
   --output ./manifest.json
+
+# 9. Author + validate an Agent Control Specification (ACS) manifest.
+#    `init` scaffolds, `validate` checks (--strict for CI), `spec`
+#    renders a human-readable governance summary. See docs/ACS.md.
+a2a-testbed acs init --name my-agent -o my-agent.acs.yaml
+a2a-testbed acs validate examples/acs/email-agent.acs.yaml
+a2a-testbed acs spec examples/acs/three-party-governance.acs.yaml
+
+# 10. Apply ACS runtime governance to a scenario. Evaluates every
+#     handoff against the manifest and prints per-step verdicts
+#     (allow/warn/deny). Use the scenario's `acs:` field or --acs.
+a2a-testbed run examples/scenarios/three_party_governed.yaml
+a2a-testbed run --acs examples/acs/three-party-governance.acs.yaml \
+  examples/scenarios/three_party_consent.yaml
+
+# 11. Enforce ACS: a deny/escalate blocks the handoff before dispatch
+#     and halts the flow (instead of just recording the verdict).
+a2a-testbed run --acs-enforce \
+  --acs examples/acs/three-party-governance.acs.yaml \
+  examples/scenarios/three_party_consent.yaml
 ```
 
 The bundled three-party scenario produces a colored step table and
@@ -146,8 +171,9 @@ Run it locally:
 
 ```bash
 cd playground
-npm install
-npm run dev
+corepack enable   # activates the pinned pnpm
+pnpm install
+pnpm dev
 ```
 
 ## Repository layout
@@ -299,6 +325,13 @@ Bundled under `examples/scenarios/`:
 | `polyglot_smoke.yaml` | Polyglot architecture demo (in-process Python; subprocess scenarios in `tests/polyglot/`) |
 | `cloudflare_math_demo.yaml` | Live LLM-backed math agent on Cloudflare Workers (Llama 3.3 via Groq, JSON mode); semantic field-level assertions |
 | `task_runner_demo.yaml` | Live A2A 1.0 task-runner agent at `tasks.a2a-testbed.com`; full Tasks / SSE / push lifecycle, pairs with `--probe-external` for the contract sweep |
+| `three_party_governed.yaml` | The three-party flow with an ACS manifest attached (`acs:` field); per-step governance verdicts |
+| `cloudflare_math_governed.yaml` | ACS runtime governance against the **live** Cloudflare math agent: DLP on the real request, error-check on the real response |
+
+ACS manifests under `examples/acs/`: `email-agent.acs.yaml` (builtin),
+`email-agent-rego.acs.yaml` (OPA/Rego), `dlp-evidence.acs.yaml` (evidence
+provider), `three-party-governance.acs.yaml`, and
+`cloudflare-math-governance.acs.yaml`. See [docs/ACS.md](docs/ACS.md).
 
 ## Project goals
 

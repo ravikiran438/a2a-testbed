@@ -1,0 +1,76 @@
+# Three-party consent scenario WITH ACS runtime governance attached.
+#
+# Identical to three_party_consent.yaml, but declares an `acs:` manifest.
+# The runner evaluates each step's wire exchange against the manifest's
+# intervention points and records a verdict (allow / warn / deny /
+# escalate) per step — demonstrating the `acs:` scenario-field attach
+# path (the `--acs` CLI flag is the non-invasive alternative).
+#
+#   a2a-testbed run examples/scenarios/three_party_governed.yaml
+
+name: "Three-party consent (ACS-governed)"
+description: |
+  Same guardian-mediated consent flow as three_party_consent.yaml, with an
+  ACS manifest attached. Handoffs to the externally-labelled service
+  provider are denied; messages referencing regulated content are warned.
+
+mode: sim
+
+# Runtime governance: evaluate each handoff against this ACS manifest.
+acs: ../acs/three-party-governance.acs.yaml
+
+agents:
+  - id: alice
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+    role: principal
+  - id: bob
+    card: ../agent-cards/three-party/bob.json
+    runtime: python_inproc
+    role: guardian
+  - id: carol
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+    role: service_provider
+
+flow:
+  - from: carol
+    to: alice
+    action: request_consent
+    message: "request_consent: deliver groceries today"
+    expect:
+      response_status: "2xx"
+
+  - from: alice
+    to: bob
+    action: forward_consent_request
+    message: "forward_consent_request: GroceryHelper wants to deliver"
+    expect:
+      response_status: "2xx"
+
+  - from: bob
+    to: carol
+    action: grant_consent
+    message: "grant_consent: approved, delivery permitted"
+    expect:
+      response_status: "2xx"
+
+  - from: carol
+    to: alice
+    action: deliver
+    message: "deliver: groceries on the way"
+    expect:
+      response_status: "2xx"
+
+  - from: alice
+    to: carol
+    action: feedback
+    message: "feedback: welfare positive, dignity preserved"
+    expect:
+      response_status: "2xx"
+
+reports:
+  - format: json
+    path: reports/three_party_governed.json
+  - format: markdown
+    path: reports/three_party_governed.md

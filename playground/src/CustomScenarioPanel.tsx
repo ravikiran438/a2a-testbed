@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  parseScenarioYaml,
-  ScenarioLoadError,
-  type LoadedScenario,
-} from './scenarioLoader';
+import { type LoadedScenario, parseScenarioYaml, ScenarioLoadError } from './scenarioLoader';
 
 const SAVED_YAML_KEY = 'a2a-testbed.playground.custom_scenario_yaml';
 
@@ -92,7 +88,7 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
       const file = e.dataTransfer.files?.[0];
       if (file) onFile(file);
     },
-    [onFile]
+    [onFile],
   );
 
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -120,7 +116,7 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
             skipped === 1 ? '' : 's'
           } skipped (${breakdown}). The browser visualizes wire ` +
             `traffic only — clock advances and observer ticks have ` +
-            `no edge to draw.`
+            `no edge to draw.`,
         );
       }
       if (scenario.cardsTotal > 0 && scenario.cardsResolved < scenario.cardsTotal) {
@@ -128,8 +124,7 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
         notes.push(
           `${missing} agent${
             missing === 1 ? '' : 's'
-          } show a "?" badge — click it on the canvas to upload that ` +
-            `agent's card JSON.`
+          } show a "?" badge — click it on the canvas to upload that agent's card JSON.`,
         );
       }
 
@@ -170,11 +165,10 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
         </div>
 
         <p className="modal-lead">
-          Paste a YAML scenario, or drop / pick a <code>.yaml</code> file.
-          The same format works in the CLI (<code>a2a-testbed run</code>)
-          and the browser. Execution-only fields like agent runtimes,
-          card paths, and reports are ignored — the canvas just
-          visualizes the message graph.
+          Paste a YAML scenario, or drop / pick a <code>.yaml</code> file. The same format works in
+          the CLI (<code>a2a-testbed run</code>) and the browser. Execution-only fields like agent
+          runtimes, card paths, and reports are ignored — the canvas just visualizes the message
+          graph.
         </p>
 
         <div
@@ -192,8 +186,7 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
             rows={18}
           />
           <div className="modal-drop-hint">
-            Drop a <code>.yaml</code> file anywhere on this textarea
-            to load it.
+            Drop a <code>.yaml</code> file anywhere on this textarea to load it.
           </div>
         </div>
 
@@ -221,10 +214,7 @@ export function CustomScenarioPanel({ open, onClose, onLoad }: Props) {
         )}
 
         <div className="modal-actions">
-          <button
-            className="btn"
-            onClick={() => fileInputRef.current?.click()}
-          >
+          <button className="btn" onClick={() => fileInputRef.current?.click()}>
             Pick .yaml file
           </button>
           <button

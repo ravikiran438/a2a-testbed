@@ -101,9 +101,10 @@ def extract_spec_section(verify_fn: Callable[..., Any]) -> Optional[str]:
 
 
 class ContractCategory(str, Enum):
-    TRANSPORT = "transport"     # wire-level invariants
-    NETWORK = "network"         # multi-agent flow invariants
-    EXTENSION = "extension"     # protocol-extension semantic invariants
+    TRANSPORT = "transport"  # wire-level invariants
+    NETWORK = "network"  # multi-agent flow invariants
+    EXTENSION = "extension"  # protocol-extension semantic invariants
+    POLICY = "policy"  # ACS runtime-governance invariants
 
 
 @dataclass
@@ -164,6 +165,7 @@ class Contract:
             )
         except Exception as exc:
             import traceback
+
             return ContractResult(
                 self.id,
                 passed=False,

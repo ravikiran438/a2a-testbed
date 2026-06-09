@@ -14,14 +14,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="In-browser playground for the a2a-testbed: multi-agent A2A scenarios and AgentCard validation."
+      content="In-browser playground for the a2a-testbed: multi-agent A2A scenarios, AgentCard and Agent Control Specification (ACS) manifest validation, and ACS runtime-governance checks."
+    />
+    <meta
+      name="keywords"
+      content="A2A, Agent2Agent, AgentCard, Agent Control Specification, ACS, agent governance, runtime governance, conformance testing, multi-agent, MCP"
     />
     <link rel="canonical" href="https://a2a-testbed.com/" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta property="og:title" content="a2a-testbed" />
     <meta
       property="og:description"
-      content="Test A2A agent networks before you ship them — multi-agent scenarios, AgentCard validation, and live LLM agent checks in the browser."
+      content="Test A2A agent networks before you ship them — multi-agent scenarios, AgentCard and ACS (Agent Control Specification) validation, runtime governance, and live LLM agent checks in the browser."
     />
     <meta property="og:url" content="https://a2a-testbed.com/" />
     <meta property="og:type" content="website" />
@@ -34,7 +38,7 @@
     <meta name="twitter:title" content="a2a-testbed" />
     <meta
       name="twitter:description"
-      content="Test A2A agent networks before you ship them. Live at a2a-testbed.com."
+      content="Test A2A agent networks before you ship them — scenarios, AgentCard + ACS (Agent Control Specification) validation, and runtime governance. Live at a2a-testbed.com."
     />
     <meta
       name="twitter:image"
@@ -53,7 +57,7 @@
             "@id": "https://a2a-testbed.com/#website",
             "url": "https://a2a-testbed.com/",
             "name": "a2a-testbed",
-            "description": "In-browser playground for testing A2A multi-agent networks, validating AgentCards, and exercising live LLM-backed A2A agents.",
+            "description": "In-browser playground for testing A2A multi-agent networks, validating AgentCards and Agent Control Specification (ACS) manifests, applying ACS runtime governance, and exercising live LLM-backed A2A agents.",
             "inLanguage": "en"
           },
           {
@@ -62,14 +66,32 @@
             "url": "https://a2a-testbed.com/",
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "Any (browser)",
-            "description": "Polyglot multi-agent testbed for the A2A protocol. Run scripted scenarios across Python, Go, Node.js, Java agents; validate AgentCards against published JSON Schema manifests; drive real LLM-backed agents from the browser with full expectation enforcement.",
+            "description": "Polyglot multi-agent testbed for the A2A protocol. Run scripted scenarios across Python, Go, Node.js, and Java agents; validate AgentCards and Agent Control Specification (ACS) manifests; apply ACS runtime governance (allow/warn/deny/escalate) with fail-closed enforcement; drive real LLM-backed agents from the browser with full expectation enforcement.",
+            "featureList": [
+              "Multi-agent A2A scenario runner",
+              "A2A 1.0 conformance contracts with spec citations",
+              "AgentCard and extension-manifest validation",
+              "Agent Control Specification (ACS) manifest validation",
+              "ACS runtime governance with fail-closed enforcement",
+              "Polyglot agents: Python, Go, Node.js, Java",
+              "Fault injection and virtual time control"
+            ],
+            "keywords": "A2A, Agent2Agent, AgentCard, Agent Control Specification, ACS, agent governance, conformance testing, multi-agent, MCP",
             "offers": {
               "@type": "Offer",
               "price": "0",
               "priceCurrency": "USD"
             },
             "license": "https://www.apache.org/licenses/LICENSE-2.0",
-            "codeRepository": "https://github.com/ravikiran438/a2a-testbed"
+            "codeRepository": "https://github.com/ravikiran438/a2a-testbed",
+            "sameAs": "https://github.com/ravikiran438/a2a-testbed",
+            "isBasedOn": [
+              "https://a2a-protocol.org/",
+              "https://github.com/microsoft/agent-governance-toolkit/blob/main/policy-engine/spec/SPECIFICATION.md",
+              "https://github.com/microsoft/agent-governance-toolkit",
+              "https://github.com/microsoft/ASSERT",
+              "https://modelcontextprotocol.io/"
+            ]
           }
         ]
       }

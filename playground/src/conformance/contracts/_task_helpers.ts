@@ -58,7 +58,7 @@ export async function probeForTask(
   opts: ProbeOpts = {},
 ): Promise<TaskShape | null> {
   const message: Record<string, unknown> = {
-    messageId: 'probe-' + randHex(),
+    messageId: `probe-${randHex()}`,
     role: 'user',
     parts: [{ kind: 'text', text: opts.text ?? 'task-probe' }],
   };
@@ -68,7 +68,7 @@ export async function probeForTask(
     agentUrl,
     'message/send',
     { message },
-    'task-probe-' + randHex(),
+    `task-probe-${randHex()}`,
   );
   if (!body || typeof body !== 'object') return null;
   const result = (body as Record<string, unknown>).result;

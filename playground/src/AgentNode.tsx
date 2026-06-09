@@ -1,4 +1,4 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, type NodeProps, Position } from '@xyflow/react';
 
 type AgentState = 'idle' | 'sending' | 'receiving' | 'done';
 
@@ -91,12 +91,8 @@ export function AgentNode({ data }: NodeProps) {
               d.onLoadCard?.(d.cardId);
             }}
           >
-            <span className="agent-card-pill-icon">
-              {d.hasCard ? '✓' : '↑'}
-            </span>
-            <span className="agent-card-pill-name">
-              {d.cardHint.split(/[\\/]/).pop()}
-            </span>
+            <span className="agent-card-pill-icon">{d.hasCard ? '✓' : '↑'}</span>
+            <span className="agent-card-pill-name">{d.cardHint.split(/[\\/]/).pop()}</span>
           </button>
         )}
       </div>
@@ -106,9 +102,7 @@ export function AgentNode({ data }: NodeProps) {
           className="agent-missing-card"
           title={
             d.cardHint
-              ? `No AgentCard loaded — click to upload ${d.cardHint
-                  .split(/[\\/]/)
-                  .pop()}`
+              ? `No AgentCard loaded — click to upload ${d.cardHint.split(/[\\/]/).pop()}`
               : 'No AgentCard loaded — click to upload one'
           }
           onClick={(e) => {

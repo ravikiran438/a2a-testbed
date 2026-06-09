@@ -17,8 +17,6 @@ from pydantic import BaseModel, Field
 
 from a2a_testbed.manifest import (
     ExtensionManifest,
-    ExtensionMetadata,
-    Finding,
     FindingKind,
     InMemoryManifestStore,
     LocalManifestStore,
@@ -50,10 +48,7 @@ FAKE_URI = "https://example.org/fake-protocol/v1"
 
 
 def test_manifest_uri_url_convention():
-    assert (
-        manifest_url_for_uri(FAKE_URI)
-        == "https://example.org/fake-protocol/v1/manifest.json"
-    )
+    assert manifest_url_for_uri(FAKE_URI) == "https://example.org/fake-protocol/v1/manifest.json"
 
 
 def test_generator_emits_well_formed_manifest():
@@ -222,7 +217,8 @@ async def test_validate_manifest_not_found():
         {"version": "1.0.0", "endpoint": "https://x"},
     )
     findings = await validate_agent_card(
-        card, store=InMemoryManifestStore()  # empty store
+        card,
+        store=InMemoryManifestStore(),  # empty store
     )
     assert len(findings) == 1
     assert findings[0].kind == FindingKind.MANIFEST_NOT_FOUND
@@ -249,9 +245,7 @@ async def test_validate_unsupported_manifest_version(fake_manifest):
     payload["manifest_version"] = "2.0.0"
     forged = ExtensionManifest.model_validate(payload)
     store = InMemoryManifestStore({FAKE_URI: forged})
-    card = _card_declaring(
-        FAKE_URI, {"version": "1.0.0", "endpoint": "https://x"}
-    )
+    card = _card_declaring(FAKE_URI, {"version": "1.0.0", "endpoint": "https://x"})
     findings = await validate_agent_card(card, store=store)
     assert findings[0].kind == FindingKind.MANIFEST_VERSION_UNSUPPORTED
 
@@ -300,6 +294,7 @@ SHIPPED_MANIFEST_URIS = [
 @pytest.mark.parametrize("uri", SHIPPED_MANIFEST_URIS)
 def test_shipped_manifest_loads_and_validates(uri):
     import httpx
+
     manifest_url = uri.rstrip("/") + "/manifest.json"
     try:
         resp = httpx.get(manifest_url, timeout=5.0)

@@ -76,7 +76,7 @@ async function loadManifest(uri: string): Promise<ManifestEnvelope> {
     throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);
   }
   const json = (await res.json()) as ManifestEnvelope;
-  if (!json.extension || !json.extension.uri) {
+  if (!json.extension?.uri) {
     throw new Error('manifest missing required `extension.uri` field');
   }
   manifestCache.set(uri, json);
@@ -95,9 +95,7 @@ function extractParams(entry: { params?: unknown; payload?: unknown }): unknown 
   return Object.keys(extras).length ? extras : undefined;
 }
 
-export async function validateAgentCard(
-  card: AgentCardLike
-): Promise<Finding[]> {
+export async function validateAgentCard(card: AgentCardLike): Promise<Finding[]> {
   const extensions = card.capabilities?.extensions ?? [];
   if (extensions.length === 0) {
     return [];
@@ -145,8 +143,7 @@ export async function validateAgentCard(
       findings.push({
         uri,
         kind: 'declared_ok',
-        detail:
-          'manifest declares no payload schema; entry treated as opaque',
+        detail: 'manifest declares no payload schema; entry treated as opaque',
         manifestName: manifest.extension.name,
         manifestVersion: manifest.extension.version,
       });

@@ -21,7 +21,7 @@ export interface Contract {
    * - `return string` for a soft pass with the deviation in the
    *   detail column (mirrors the Python runner's behavior).
    */
-  verify: (agentUrl: string) => Promise<void | string>;
+  verify: (agentUrl: string) => Promise<undefined | string>;
 }
 
 export interface ContractResult {

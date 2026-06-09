@@ -20,28 +20,28 @@ from pydantic import BaseModel, ConfigDict, Field
 class NetworkMode(str, Enum):
     """Top-level network topology a scenario can request."""
 
-    SIM = "sim"          # multi-tenant: one HTTP server, N agents on path prefixes
-    REALISTIC = "realistic"   # per-agent: each agent runs in its own process+port
+    SIM = "sim"  # multi-tenant: one HTTP server, N agents on path prefixes
+    REALISTIC = "realistic"  # per-agent: each agent runs in its own process+port
 
 
 class RuntimeKind(str, Enum):
     """How an agent is materialized for the scenario."""
 
-    PYTHON_INPROC = "python_inproc"     # in the orchestrator process (fastest)
-    PYTHON_SUBPROC = "python_subproc"   # spawned `python -m ...` subprocess
-    GO = "go"                            # spawned `go run ./agents/go-template/`
-    NODEJS = "nodejs"                    # spawned `node ./agents/nodejs-template/`
-    JAVA = "java"                        # spawned `java -jar ...`
-    EXTERNAL = "external"                # already running, just point at url
+    PYTHON_INPROC = "python_inproc"  # in the orchestrator process (fastest)
+    PYTHON_SUBPROC = "python_subproc"  # spawned `python -m ...` subprocess
+    GO = "go"  # spawned `go run ./agents/go-template/`
+    NODEJS = "nodejs"  # spawned `node ./agents/nodejs-template/`
+    JAVA = "java"  # spawned `java -jar ...`
+    EXTERNAL = "external"  # already running, just point at url
 
 
 class FaultKind(str, Enum):
     """Failure injection kinds applied at message dispatch."""
 
     NONE = "none"
-    DROP = "drop"            # response never returned (timeout)
-    DELAY = "delay"          # response delayed by `delay_ms`
-    CORRUPT = "corrupt"      # body mutated before delivery
+    DROP = "drop"  # response never returned (timeout)
+    DELAY = "delay"  # response delayed by `delay_ms`
+    CORRUPT = "corrupt"  # body mutated before delivery
     HTTP_ERROR = "http_error"  # synthetic 4xx/5xx response
 
 
@@ -155,6 +155,19 @@ class Scenario(BaseModel):
     agents: list[AgentDecl] = Field(min_length=1)
     flow: list[Step] = Field(min_length=1)
     reports: list[ReportSink] = Field(default_factory=list)
+    # Optional path to an Agent Control Specification (ACS) manifest,
+    # relative to the scenario file. When present (or supplied via the
+    # `--acs` CLI flag), the runner evaluates each step's wire exchange
+    # against the manifest's intervention points and records verdicts.
+    acs: Optional[str] = Field(
+        default=None,
+        description="Path to an ACS manifest YAML (relative to the scenario file).",
+    )
+    # When True, ACS verdicts are *enforced*: a deny/escalate blocks the
+    # handoff and halts the flow. When False (default), verdicts are
+    # recorded and surfaced but the flow proceeds. The `--acs-enforce`
+    # CLI flag overrides this.
+    acs_enforce: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +187,15 @@ class StepResult(BaseModel):
     response_status: Optional[int] = None
     response_body_excerpt: Optional[str] = None
     elapsed_ms: float = 0.0
+    # ACS verdicts recorded for this step's wire exchange, one per
+    # evaluated intervention point. Stored as plain dicts (the
+    # serialized form of ``a2a_testbed.acs.types.Verdict``) so the
+    # ``core`` layer stays decoupled from the ``acs`` package. Empty
+    # unless the scenario runs with an ACS manifest.
+    acs_verdicts: list[dict[str, Any]] = Field(default_factory=list)
+    # True when ACS enforce mode blocked this step (a deny/escalate
+    # verdict halted the handoff). Always False in record-only mode.
+    acs_blocked: bool = False
 
 
 class ContractFinding(BaseModel):
@@ -237,3 +259,18 @@ class ScenarioResult(BaseModel):
     @property
     def contracts_fail_count(self) -> int:
         return sum(1 for c in self.contracts if not c.passed)
+
+    @property
+    def acs_verdicts(self) -> list[dict[str, Any]]:
+        """All ACS verdicts across every step, flattened."""
+        out: list[dict[str, Any]] = []
+        for s in self.steps:
+            for v in s.acs_verdicts:
+                out.append({"step_index": s.step_index, **v})
+        return out
+
+    @property
+    def acs_blocked_count(self) -> int:
+        """Verdicts that would block the action (deny or escalate)."""
+        blocking = {"deny", "escalate"}
+        return sum(1 for v in self.acs_verdicts if v.get("decision") in blocking)

@@ -14,7 +14,6 @@ from a2a_testbed.core.loader import (
     AgentCardLoadError,
     declared_extension_uris,
     load_agent_card_from_path,
-    load_agent_card_from_str,
     required_extension_uris,
 )
 

@@ -1,0 +1,71 @@
+# ACS governance manifest for the three-party consent scenario.
+#
+# Demonstrates ACS *applied to an existing scenario* with no changes to
+# the agents or the flow. Each A2A handoff is shaped as a `pre_tool_call`
+# (the receiving agent is the "tool"); the policy reasons about the
+# receiver's security label and the message content.
+#
+# Against examples/scenarios/three_party_consent.yaml this yields a mix
+# of verdicts — allow / warn / deny — so the per-step governance is
+# visible both in the CLI table and as colored edges in the playground:
+#
+#   carol -> alice  request_consent (…groceries…)  WARN  (content)
+#   alice -> bob    forward_consent_request        ALLOW (default)
+#   bob   -> carol  grant_consent                  DENY  (external tool)
+#   carol -> alice  deliver (…groceries…)          WARN  (content)
+#   alice -> carol  feedback                        DENY  (external tool)
+#
+# Apply it without editing the scenario:
+#   a2a-testbed run --acs examples/acs/three-party-governance.acs.yaml \
+#     examples/scenarios/three_party_consent.yaml
+
+agent_control_specification_version: "0.3.1-beta"
+
+metadata:
+  name: "three-party-governance"
+  description: "Govern handoffs by receiver clearance and message content."
+
+policies:
+  handoff_policy:
+    type: builtin
+    default_decision: allow
+    rules:
+      # First match wins. Deny any handoff to an externally-labelled
+      # agent (here, the service provider Carol).
+      - name: deny-external-receiver
+        field: "tool.security_labels"
+        op: contains
+        value: "external"
+        decision: deny
+        description: "handoff target carries an 'external' security label"
+      # Otherwise, flag handoffs whose message mentions a regulated topic.
+      - name: warn-regulated-content
+        field: "policy_target.value.message.parts.0.text"
+        op: contains
+        value: "groceries"
+        decision: warn
+        description: "message references regulated delivery content"
+
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy: handoff_policy
+
+tools:
+  alice:
+    type: Tool
+    id: alice
+    clearance: internal
+    security_labels: [internal]
+  bob:
+    type: Tool
+    id: bob
+    clearance: internal
+    security_labels: [internal]
+  carol:
+    type: Tool
+    id: carol
+    clearance: external
+    security_labels: [external]

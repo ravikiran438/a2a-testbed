@@ -1,0 +1,39 @@
+# ACS manifest using a REGO policy (vs. the builtin engine).
+#
+# Same intent as email-agent.acs.yaml — deny email handoffs to external
+# recipients — but the policy is Open Policy Agent / Rego, matching the
+# ACS reference shape. Requires the OPA binary and a registered Rego
+# backend; otherwise the evaluator fails closed.
+#
+#   from a2a_testbed.acs import AcsEvaluator, validate_manifest
+#   from a2a_testbed.acs.rego import register_rego_backend
+#   ev = AcsEvaluator(fail_closed=True); register_rego_backend(ev)
+#   # ev.evaluate(manifest, InterventionPoint.PRE_TOOL_CALL, snapshot)
+#
+# `a2a-testbed acs validate` will WARN that this policy needs an external
+# backend — that warning is expected and correct.
+
+agent_control_specification_version: "0.3.1-beta"
+
+metadata:
+  name: "email-agent-rego"
+  description: "Deny external email recipients via an OPA/Rego policy."
+
+policies:
+  email_policy:
+    type: rego
+    bundle: ./rego          # directory containing email.rego (relative to cwd)
+    query: data.email_agent.verdict
+
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy: email_policy
+
+tools:
+  send_email:
+    type: Tool
+    id: send_email
+    clearance: internal

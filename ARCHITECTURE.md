@@ -75,7 +75,7 @@ Polyglot lifecycle adapters. Each implements `start()` / `stop()` /
 | `python_subproc` | subprocess | `python main.py --agent-card ...` |
 | `go` | subprocess | `go run ./agents/go-template/ --agent-card ...` |
 | `nodejs` | subprocess | `node ./agents/nodejs-template/index.js --agent-card ...` |
-| `java` | subprocess | `java -jar ./agents/java-template/agent.jar --agent-card ...` *(reference jar not shipped yet; adapter exists, runtime kind reserved)* |
+| `java` | subprocess | `java -jar ./agents/java-template/target/agent.jar --agent-card ...` *(build the jar once: `mvn package` or `./build.sh`)* |
 | `external` | none | Already running; testbed only points at the URL |
 
 Subprocess runtimes share `subprocess_base.SubprocessRuntimeBase`
@@ -166,10 +166,9 @@ areas of this testbed:
   not deeply introspect a single running agent.
 - **Multi-agent orchestration** — full. JSON AgentCards declare the
   cohort; the scenario YAML drives the flow.
-- **Cross-runtime polyglot** — full for Python, Go, Node.js in the
-  same scenario; Java adapter scaffolded but inactive (reference
-  jar pending — see
-  [`agents/java-template/`](agents/java-template/)).
+- **Cross-runtime polyglot** — full for Python, Go, Node.js, and Java
+  (build the Java jar once — see
+  [`agents/java-template/`](agents/java-template/)) in the same scenario.
 - **Failure injection** — full. Drop, delay, corrupt, HTTP-error at
   the wire seam, declared per step.
 - **Virtual time control** — full. Per-scenario clock with explicit
@@ -282,13 +281,14 @@ contract is added in one place and not the other. Two safeguards:
   mirrors `src/a2a_testbed/contracts/runner.py#transport_contracts`
   in the same order. A reviewer can `diff` the two lists at a
   glance.
+- **Automated parity guard** — `tests/test_browser_parity.py`
+  fingerprints both registries from source (transport contract ids,
+  plus the ACS finding-kinds / decisions / intervention points / ops)
+  and fails the suite on any divergence. No JS execution required, so
+  it runs in any CI.
 - **Quarterly review (CONTRIBUTING.md)** — when bumping the spec
   pin, the checklist explicitly flags adding new contracts to
-  *both* surfaces. Skipping the TS port surfaces in `coverage`
-  command output (which counts the Python implementation only)
-  but doesn't break tests, so the review is the only safety net.
-  Future hardening: a `tests/test_browser_parity.py` that
-  fingerprints both registries and fails on drift.
+  *both* surfaces, backstopping the parity guard.
 
 ### What's covered
 
@@ -339,8 +339,8 @@ against the same evidence.
 | ☑ | Multi-tenant network (sim mode) |
 | ☑ | Per-process network (realistic mode) |
 | ☑ | Transport abstraction — `A2ATransport` is the only implementation today; alternative inter-agent protocols plug in as `Transport` subclasses |
-| ☑ | Polyglot runtime adapters — Python in-process, Python subprocess, Go, Node.js, external URL; Java template documented (jar pending contributor) |
-| ◐ | Polyglot subprocess end-to-end — Python verified; Go / Node.js / Java exercised in `tests/polyglot/` when the toolchain is on `PATH` |
+| ☑ | Polyglot runtime adapters — Python in-process, Python subprocess, Go, Node.js, Java, external URL |
+| ◐ | Polyglot subprocess end-to-end — Python verified; Go / Node.js / Java exercised in `tests/polyglot/` when the toolchain is on `PATH` (Java also needs the jar built) |
 | ☑ | Faults: drop / delay / corrupt / http_error |
 | ☑ | Virtual time controller |
 | ☑ | Observer agents + wire-level traffic taps |
@@ -371,7 +371,7 @@ Legend: ☑ shipped · ◐ partial · ☐ planned
 | ☑ | Track | What lands |
 |---|---|---|
 | ☑ | Core runtime | Sim mode, realistic mode, faults, virtual time, observers, multi-tenant network, polyglot runtime adapters, transport abstraction, spec-derived conformance contracts |
-| ◐ | Cross-SDK polyglot end-to-end | Go, Node.js subprocess agents (Python verified end-to-end); Java reference agent pending |
+| ☑ | Cross-SDK polyglot end-to-end | Python, Go, Node.js, and Java subprocess agents (build the Java jar once) |
 | ☑ | Extension validation | ExtensionManifest convention, generic JSON-Schema validator, MCP delegation glue for richer per-extension semantic checks |
 | ☑ | Vendor compatibility | Static AgentCard compatibility check against A2A 1.0 + user-pluggable dialect-file framework for non-A2A platforms |
 | ☑ | In-browser playground | React + xyflow canvas + animation + browser-side AgentCard validator (alpha) |

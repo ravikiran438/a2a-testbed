@@ -35,19 +35,10 @@ export const wellKnownCard: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { status, body } = await fetchCard(agentUrl);
-    assert(
-      status === 200,
-      `well-known card endpoint returned ${status}, expected 200`,
-    );
-    assert(
-      body && typeof body === 'object',
-      'card body did not parse as a JSON object',
-    );
+    assert(status === 200, `well-known card endpoint returned ${status}, expected 200`);
+    assert(body && typeof body === 'object', 'card body did not parse as a JSON object');
     const card = body as Record<string, unknown>;
-    assert(
-      typeof card.name === 'string' && card.name,
-      'card.name is missing or empty',
-    );
+    assert(typeof card.name === 'string' && card.name, 'card.name is missing or empty');
   },
 };
 
@@ -63,10 +54,7 @@ export const agentCardRequiredFields: Contract = {
 
     for (const field of ['name', 'description', 'version']) {
       const v = card[field];
-      assert(
-        typeof v === 'string' && v,
-        `${field} is REQUIRED but missing/empty`,
-      );
+      assert(typeof v === 'string' && v, `${field} is REQUIRED but missing/empty`);
     }
     const interfaces = card.supportedInterfaces;
     assert(
@@ -74,20 +62,11 @@ export const agentCardRequiredFields: Contract = {
       'supportedInterfaces MUST have ≥1 entry',
     );
     const skills = card.skills;
-    assert(
-      Array.isArray(skills) && skills.length >= 1,
-      'skills MUST have ≥1 entry',
-    );
+    assert(Array.isArray(skills) && skills.length >= 1, 'skills MUST have ≥1 entry');
     const inputs = card.defaultInputModes;
-    assert(
-      Array.isArray(inputs) && inputs.length >= 1,
-      'defaultInputModes MUST have ≥1 entry',
-    );
+    assert(Array.isArray(inputs) && inputs.length >= 1, 'defaultInputModes MUST have ≥1 entry');
     const outputs = card.defaultOutputModes;
-    assert(
-      Array.isArray(outputs) && outputs.length >= 1,
-      'defaultOutputModes MUST have ≥1 entry',
-    );
+    assert(Array.isArray(outputs) && outputs.length >= 1, 'defaultOutputModes MUST have ≥1 entry');
     assert(
       card.capabilities && typeof card.capabilities === 'object',
       'capabilities object is REQUIRED on the AgentCard',
@@ -107,10 +86,7 @@ export const agentCardSkillAttributes: Contract = {
     skills.forEach((s, i) => {
       assert(s && typeof s === 'object', `skills[${i}] MUST be an object`);
       const sk = s as Record<string, unknown>;
-      assert(
-        typeof sk.id === 'string' && sk.id,
-        `skills[${i}].id REQUIRED, non-empty string`,
-      );
+      assert(typeof sk.id === 'string' && sk.id, `skills[${i}].id REQUIRED, non-empty string`);
       assert(
         typeof sk.name === 'string' && sk.name,
         `skills[${i}].name REQUIRED, non-empty string`,
@@ -119,10 +95,7 @@ export const agentCardSkillAttributes: Contract = {
         typeof sk.description === 'string' && sk.description,
         `skills[${i}].description REQUIRED, non-empty string`,
       );
-      assert(
-        Array.isArray(sk.tags),
-        `skills[${i}].tags REQUIRED, array (may be empty)`,
-      );
+      assert(Array.isArray(sk.tags), `skills[${i}].tags REQUIRED, array (may be empty)`);
     });
   },
 };
@@ -146,10 +119,7 @@ export const agentCardSkillIdUnique: Contract = {
       .filter(([, n]) => n > 1)
       .map(([id]) => id)
       .sort();
-    assert(
-      duplicates.length === 0,
-      `duplicate skill ids on AgentCard: ${duplicates.join(', ')}`,
-    );
+    assert(duplicates.length === 0, `duplicate skill ids on AgentCard: ${duplicates.join(', ')}`);
   },
 };
 
@@ -168,10 +138,7 @@ export const agentCardCapabilitiesObject: Contract = {
     const c = caps as Record<string, unknown>;
     for (const f of ['streaming', 'pushNotifications', 'extendedAgentCard']) {
       if (f in c) {
-        assert(
-          typeof c[f] === 'boolean',
-          `capabilities.${f} MUST be a boolean if present`,
-        );
+        assert(typeof c[f] === 'boolean', `capabilities.${f} MUST be a boolean if present`);
       }
     }
     if (c.extensions !== undefined) {
@@ -180,15 +147,9 @@ export const agentCardCapabilitiesObject: Contract = {
         'capabilities.extensions MUST be a JSON array if present',
       );
       (c.extensions as unknown[]).forEach((ext, i) => {
-        assert(
-          ext && typeof ext === 'object',
-          `extensions[${i}] MUST be an object`,
-        );
+        assert(ext && typeof ext === 'object', `extensions[${i}] MUST be an object`);
         const e = ext as Record<string, unknown>;
-        assert(
-          typeof e.uri === 'string' && e.uri,
-          `extensions[${i}].uri REQUIRED`,
-        );
+        assert(typeof e.uri === 'string' && e.uri, `extensions[${i}].uri REQUIRED`);
       });
     }
   },
@@ -201,26 +162,16 @@ export const agentCardSupportedInterfaces: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown })
-      .supportedInterfaces;
-    assert(
-      Array.isArray(interfaces),
-      'supportedInterfaces MUST be an array',
-    );
+    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
+    assert(Array.isArray(interfaces), 'supportedInterfaces MUST be an array');
     interfaces.forEach((entry, i) => {
-      assert(
-        entry && typeof entry === 'object',
-        `supportedInterfaces[${i}] MUST be an object`,
-      );
+      assert(entry && typeof entry === 'object', `supportedInterfaces[${i}] MUST be an object`);
       const e = entry as Record<string, unknown>;
       assert(
         typeof e.protocolBinding === 'string' && e.protocolBinding,
         `supportedInterfaces[${i}].protocolBinding REQUIRED`,
       );
-      assert(
-        typeof e.url === 'string' && e.url,
-        `supportedInterfaces[${i}].url REQUIRED`,
-      );
+      assert(typeof e.url === 'string' && e.url, `supportedInterfaces[${i}].url REQUIRED`);
     });
   },
 };
@@ -232,8 +183,7 @@ export const agentCardPreferredInterface: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown })
-      .supportedInterfaces;
+    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
     assert(
       Array.isArray(interfaces) && interfaces.length > 0,
       'supportedInterfaces MUST be a non-empty array',
@@ -267,18 +217,14 @@ export const agentCardUrlWellFormed: Contract = {
     }
     const provider = card.provider as Record<string, unknown> | undefined;
     if (provider?.url != null && !isAbsoluteUrl(provider.url)) {
-      offenders.push(
-        `provider.url=${JSON.stringify(provider.url)} is not absolute`,
-      );
+      offenders.push(`provider.url=${JSON.stringify(provider.url)} is not absolute`);
     }
     const interfaces = card.supportedInterfaces;
     if (Array.isArray(interfaces)) {
       interfaces.forEach((entry, i) => {
         const u = (entry as Record<string, unknown>)?.url;
         if (u != null && !isAbsoluteUrl(u)) {
-          offenders.push(
-            `supportedInterfaces[${i}].url=${JSON.stringify(u)} is not absolute`,
-          );
+          offenders.push(`supportedInterfaces[${i}].url=${JSON.stringify(u)} is not absolute`);
         }
       });
     }
@@ -293,8 +239,7 @@ export const agentCardHttpsUrls: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown })
-      .supportedInterfaces;
+    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
     if (!Array.isArray(interfaces)) return;
     const offenders: string[] = [];
     interfaces.forEach((entry, i) => {
@@ -312,15 +257,10 @@ export const agentCardHttpsUrls: Contract = {
         scheme = '';
       }
       if (scheme !== 'https' && scheme !== 'wss') {
-        offenders.push(
-          `supportedInterfaces[${i}] (${binding}) url ${url} uses ${scheme || '?'}`,
-        );
+        offenders.push(`supportedInterfaces[${i}] (${binding}) url ${url} uses ${scheme || '?'}`);
       }
     });
-    assert(
-      offenders.length === 0,
-      `production MUST use https/wss: ${offenders.join('; ')}`,
-    );
+    assert(offenders.length === 0, `production MUST use https/wss: ${offenders.join('; ')}`);
   },
 };
 
@@ -337,12 +277,8 @@ export const agentCardSecuritySchemes: Contract = {
       typeof schemes === 'object' && !Array.isArray(schemes),
       'securitySchemes MUST be an object keyed by scheme name',
     );
-    const recognized = new Set([
-      'apiKey', 'http', 'oauth2', 'openIdConnect', 'mutualTLS',
-    ]);
-    for (const [name, spec] of Object.entries(
-      schemes as Record<string, unknown>,
-    )) {
+    const recognized = new Set(['apiKey', 'http', 'oauth2', 'openIdConnect', 'mutualTLS']);
+    for (const [name, spec] of Object.entries(schemes as Record<string, unknown>)) {
       assert(
         spec && typeof spec === 'object',
         `securitySchemes[${JSON.stringify(name)}] MUST be an object`,
@@ -359,8 +295,7 @@ export const agentCardSecuritySchemes: Contract = {
 export const providerWellFormed: Contract = {
   id: 'transport.provider_well_formed',
   specSection: '§4.4.1',
-  description:
-    'AgentCard.provider object (when present) carries organization + valid URL.',
+  description: 'AgentCard.provider object (when present) carries organization + valid URL.',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
@@ -387,8 +322,7 @@ export const providerWellFormed: Contract = {
 export const defaultModesDistinct: Contract = {
   id: 'transport.default_modes_distinct',
   specSection: '§4.4.1',
-  description:
-    'defaultInputModes / defaultOutputModes contain no duplicate values.',
+  description: 'defaultInputModes / defaultOutputModes contain no duplicate values.',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
@@ -417,14 +351,12 @@ export const defaultModesDistinct: Contract = {
 export const extensionsUriAbsolute: Contract = {
   id: 'transport.extensions_uri_absolute',
   specSection: '§4.4.4',
-  description:
-    'capabilities.extensions[*].uri values are absolute HTTP(S) URLs.',
+  description: 'capabilities.extensions[*].uri values are absolute HTTP(S) URLs.',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
     const exts =
-      (body as { capabilities?: { extensions?: unknown } })?.capabilities
-        ?.extensions ?? [];
+      (body as { capabilities?: { extensions?: unknown } })?.capabilities?.extensions ?? [];
     if (!Array.isArray(exts)) return;
     const offenders: string[] = [];
     exts.forEach((ext, i) => {
@@ -452,14 +384,12 @@ export const extensionsUriAbsolute: Contract = {
 export const extensionsUriUnique: Contract = {
   id: 'transport.extensions_uri_unique',
   specSection: '§4.4.4',
-  description:
-    'capabilities.extensions[*].uri values are unique within the card.',
+  description: 'capabilities.extensions[*].uri values are unique within the card.',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
     const exts =
-      (body as { capabilities?: { extensions?: unknown } })?.capabilities
-        ?.extensions ?? [];
+      (body as { capabilities?: { extensions?: unknown } })?.capabilities?.extensions ?? [];
     if (!Array.isArray(exts)) return;
     const seen = new Map<string, number>();
     for (const ext of exts) {
@@ -471,10 +401,7 @@ export const extensionsUriUnique: Contract = {
       .filter(([, n]) => n > 1)
       .map(([u]) => u)
       .sort();
-    assert(
-      dups.length === 0,
-      `duplicate extension URIs on AgentCard: ${dups.join(', ')}`,
-    );
+    assert(dups.length === 0, `duplicate extension URIs on AgentCard: ${dups.join(', ')}`);
   },
 };
 
@@ -483,17 +410,13 @@ const BASE64URL = /^[A-Za-z0-9_-]+=*$/;
 export const signaturesWellFormed: Contract = {
   id: 'transport.signatures_well_formed',
   specSection: '§4.4',
-  description:
-    'AgentCard.signatures (when present) are well-formed JWS entries.',
+  description: 'AgentCard.signatures (when present) are well-formed JWS entries.',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
     const sigs = (body as { signatures?: unknown }).signatures;
     if (sigs == null) return;
-    assert(
-      Array.isArray(sigs),
-      `signatures MUST be an array when present`,
-    );
+    assert(Array.isArray(sigs), `signatures MUST be an array when present`);
     const offenders: string[] = [];
     sigs.forEach((sig, i) => {
       if (!sig || typeof sig !== 'object') {
@@ -503,23 +426,14 @@ export const signaturesWellFormed: Contract = {
       const s = sig as Record<string, unknown>;
       const protectedField = s.protected;
       const signature = s.signature;
-      if (
-        typeof protectedField !== 'string' ||
-        !BASE64URL.test(protectedField)
-      ) {
-        offenders.push(
-          `signatures[${i}].protected MUST be a base64url string`,
-        );
+      if (typeof protectedField !== 'string' || !BASE64URL.test(protectedField)) {
+        offenders.push(`signatures[${i}].protected MUST be a base64url string`);
       }
       if (typeof signature !== 'string' || !BASE64URL.test(signature)) {
-        offenders.push(
-          `signatures[${i}].signature MUST be a base64url string`,
-        );
+        offenders.push(`signatures[${i}].signature MUST be a base64url string`);
       }
       if (s.header != null && (typeof s.header !== 'object' || Array.isArray(s.header))) {
-        offenders.push(
-          `signatures[${i}].header MUST be an object when present`,
-        );
+        offenders.push(`signatures[${i}].header MUST be an object when present`);
       }
     });
     assert(offenders.length === 0, offenders.join('; '));
@@ -529,22 +443,18 @@ export const signaturesWellFormed: Contract = {
 export const agentCardProtocolVersionFormat: Contract = {
   id: 'transport.agent_card_protocol_version_format',
   specSection: '§3.6',
-  description:
-    'supportedInterfaces[*].protocolVersion is Major.Minor (no patch).',
+  description: 'supportedInterfaces[*].protocolVersion is Major.Minor (no patch).',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown })
-      .supportedInterfaces;
+    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
     if (!Array.isArray(interfaces)) return;
     const offenders: string[] = [];
     interfaces.forEach((entry, i) => {
       const v = (entry as Record<string, unknown>)?.protocolVersion;
       if (v == null) return;
       if (typeof v !== 'string') {
-        offenders.push(
-          `supportedInterfaces[${i}].protocolVersion must be a string`,
-        );
+        offenders.push(`supportedInterfaces[${i}].protocolVersion must be a string`);
         return;
       }
       if (!/^\d+\.\d+$/.test(v)) {

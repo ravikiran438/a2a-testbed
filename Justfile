@@ -16,8 +16,8 @@ install:
     @echo "→ Python testbed (editable + test extras)..."
     python3 -m pip install -e ".[test]"
     @echo ""
-    @echo "→ Playground (Vite + React + xyflow + ajv)..."
-    cd playground && npm install
+    @echo "→ Playground (Vite + React + xyflow + ajv) via pnpm..."
+    cd playground && pnpm install
     @echo ""
     @echo "→ Cloudflare math agent (Wrangler + types)..."
     cd examples/hosted-agents/cloudflare-math && npm install
@@ -29,7 +29,8 @@ doctor:
     @echo "Checking toolchains..."
     @command -v python3 >/dev/null 2>&1 && echo "  ✓ python3   $$(python3 --version)" || echo "  ✗ python3   missing (required)"
     @command -v node    >/dev/null 2>&1 && echo "  ✓ node      $$(node --version)"    || echo "  ✗ node      missing (required for playground + math agent)"
-    @command -v npm     >/dev/null 2>&1 && echo "  ✓ npm       $$(npm --version)"     || echo "  ✗ npm       missing (required)"
+    @command -v npm     >/dev/null 2>&1 && echo "  ✓ npm       $$(npm --version)"     || echo "  ✗ npm       missing (required for the cloudflare agents)"
+    @command -v pnpm    >/dev/null 2>&1 && echo "  ✓ pnpm      $$(pnpm --version)"    || echo "  ✗ pnpm      missing (required for the playground — run 'corepack enable')"
     @command -v go      >/dev/null 2>&1 && echo "  ✓ go        $$(go version | awk '{print $$3}')" || echo "  ○ go        missing (optional, only for Go agent template)"
     @command -v java    >/dev/null 2>&1 && echo "  ✓ java      $$(java -version 2>&1 | head -1 | awk '{print $$3}' | tr -d '\"')" || echo "  ○ java      missing (optional)"
     @command -v wrangler >/dev/null 2>&1 && echo "  ✓ wrangler  $$(wrangler --version 2>&1 | head -1)" || echo "  ○ wrangler  missing (only needed to deploy the cloudflare-math agent)"
@@ -51,7 +52,7 @@ test-py:
 # Playground TypeScript typecheck.
 test-playground:
     @echo "→ Playground typecheck..."
-    cd playground && npx tsc -b
+    cd playground && pnpm run typecheck
 
 # Cross-SDK polyglot tests (requires Go / Node.js / Java toolchains on PATH).
 test-polyglot:
@@ -69,7 +70,7 @@ build: build-playground build-math
 # Vite production build of the playground.
 build-playground:
     @echo "→ Building playground..."
-    cd playground && npm run build
+    cd playground && pnpm run build
 
 # Cloudflare-math: typecheck only (Wrangler bundles at deploy time).
 build-math:
@@ -85,7 +86,11 @@ build-math:
 lint: lint-playground
 
 lint-playground:
-    cd playground && npm run lint
+    cd playground && pnpm run lint
+
+# Auto-fix + format the playground with Biome.
+format-playground:
+    cd playground && pnpm run format
 
 
 # =============================================================================
@@ -94,7 +99,7 @@ lint-playground:
 
 # Start the in-browser playground (Vite HMR at http://localhost:5173).
 dev:
-    cd playground && npm run dev
+    cd playground && pnpm run dev
 
 # Start a local cloudflare-math worker (Wrangler at http://localhost:8787).
 # Requires .dev.vars with GROQ_API_KEY (see examples/hosted-agents/cloudflare-math/README.md).

@@ -3,18 +3,24 @@
 // /  push_*.py modules.
 
 import type { Contract } from '../types';
-import { TASK_NOT_FOUND_CODE, TERMINAL_TASK_STATES, VALID_TASK_STATES, looksLikeTask, probeForTask } from './_task_helpers';
 import {
-  PUSH_RECEIVER_BASE,
-  SseFormatError,
   callMethod,
   fetchCardJson,
   freshToken,
+  PUSH_RECEIVER_BASE,
   pushSkipDetail,
   readReceivedHooks,
-  streamSseEvents,
+  SseFormatError,
   streamingSkipDetail,
+  streamSseEvents,
 } from './_streaming_helpers';
+import {
+  looksLikeTask,
+  probeForTask,
+  TASK_NOT_FOUND_CODE,
+  TERMINAL_TASK_STATES,
+  VALID_TASK_STATES,
+} from './_task_helpers';
 
 const RPC_PATH = '/a2a/v1/';
 const TS_VALID = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
@@ -30,7 +36,7 @@ function maybeAssert(cond: unknown, message: string): asserts cond {
 async function probeStreamMessage(text: string) {
   return {
     message: {
-      messageId: 'sse-probe-' + Math.random().toString(36).slice(2, 10),
+      messageId: `sse-probe-${Math.random().toString(36).slice(2, 10)}`,
       role: 'user',
       parts: [{ kind: 'text', text }],
     },
@@ -40,8 +46,7 @@ async function probeStreamMessage(text: string) {
 export const streamingResponseContentType: Contract = {
   id: 'transport.streaming_response_content_type',
   specSection: '§3.1.2',
-  description:
-    'message/stream returns Content-Type text/event-stream.',
+  description: 'message/stream returns Content-Type text/event-stream.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -71,8 +76,7 @@ export const streamingResponseContentType: Contract = {
 export const streamingFirstEventIsTask: Contract = {
   id: 'transport.streaming_first_event_is_task',
   specSection: '§3.1.2',
-  description:
-    'First SSE event of message/stream carries the Task envelope.',
+  description: 'First SSE event of message/stream carries the Task envelope.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -86,10 +90,7 @@ export const streamingFirstEventIsTask: Contract = {
     maybeAssert(events.length > 0, 'message/stream emitted no events');
     const first = events[0] ?? {};
     const task = (first as { task?: unknown }).task;
-    maybeAssert(
-      looksLikeTask(task),
-      'first SSE event MUST carry a `task` envelope',
-    );
+    maybeAssert(looksLikeTask(task), 'first SSE event MUST carry a `task` envelope');
   },
 };
 
@@ -117,18 +118,14 @@ export const streamingEventKinds: Contract = {
         offenders.push(`event[${i}] keys=${[...keys]}`);
       }
     });
-    maybeAssert(
-      offenders.length === 0,
-      `events with no recognized kind: ${offenders.join('; ')}`,
-    );
+    maybeAssert(offenders.length === 0, `events with no recognized kind: ${offenders.join('; ')}`);
   },
 };
 
 export const streamingStatusUpdateShape: Contract = {
   id: 'transport.streaming_status_update_shape',
   specSection: '§4.1.6',
-  description:
-    'TaskStatusUpdateEvent carries taskId + status{state, timestamp}.',
+  description: 'TaskStatusUpdateEvent carries taskId + status{state, timestamp}.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -172,8 +169,7 @@ export const streamingStatusUpdateShape: Contract = {
 export const streamingArtifactUpdateShape: Contract = {
   id: 'transport.streaming_artifact_update_shape',
   specSection: '§4.1.7',
-  description:
-    'TaskArtifactUpdateEvent carries taskId + Artifact.',
+  description: 'TaskArtifactUpdateEvent carries taskId + Artifact.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -221,8 +217,7 @@ export const streamingArtifactUpdateShape: Contract = {
 export const streamingTaskIdConsistency: Contract = {
   id: 'transport.streaming_task_id_consistency',
   specSection: '§3.1.2',
-  description:
-    'All SSE events in one stream reference the same taskId.',
+  description: 'All SSE events in one stream reference the same taskId.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -235,11 +230,8 @@ export const streamingTaskIdConsistency: Contract = {
     );
     maybeAssert(events.length > 0, 'no events streamed');
     const first = events[0] ?? {};
-    const taskId = (((first as { task?: { id?: unknown } }).task ?? {}).id ?? null) as string | null;
-    maybeAssert(
-      typeof taskId === 'string' && taskId,
-      'first event must carry task.id',
-    );
+    const taskId = ((first as { task?: { id?: unknown } }).task?.id ?? null) as string | null;
+    maybeAssert(typeof taskId === 'string' && taskId, 'first event must carry task.id');
     const offenders: string[] = [];
     events.slice(1).forEach((ev, i) => {
       const payload =
@@ -278,14 +270,10 @@ export const streamingTerminalStateCloses: Contract = {
     events.forEach((ev, i) => {
       if (!('statusUpdate' in ev)) return;
       const su = ev.statusUpdate as { status?: { state?: unknown } };
-      lastState =
-        typeof su.status?.state === 'string' ? su.status.state : null;
+      lastState = typeof su.status?.state === 'string' ? su.status.state : null;
       lastStatusIndex = i;
     });
-    maybeAssert(
-      lastStatusIndex >= 0,
-      'stream emitted no terminal statusUpdate',
-    );
+    maybeAssert(lastStatusIndex >= 0, 'stream emitted no terminal statusUpdate');
     maybeAssert(
       lastState !== null && TERMINAL_TASK_STATES.has(lastState),
       `last statusUpdate state ${JSON.stringify(lastState)} not terminal`,
@@ -304,8 +292,7 @@ export const streamingTerminalStateCloses: Contract = {
 export const subscribeReturnsStream: Contract = {
   id: 'transport.subscribe_returns_stream',
   specSection: '§3.1.6',
-  description:
-    'tasks/resubscribe returns Content-Type text/event-stream.',
+  description: 'tasks/resubscribe returns Content-Type text/event-stream.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -330,17 +317,14 @@ export const subscribeReturnsStream: Contract = {
     if (ctype.toLowerCase().includes('application/json')) {
       return `tasks/resubscribe returned application/json, not text/event-stream; spec mandates SSE`;
     }
-    throw new Error(
-      `tasks/resubscribe returned unexpected content-type ${ctype}`,
-    );
+    throw new Error(`tasks/resubscribe returned unexpected content-type ${ctype}`);
   },
 };
 
 export const subscribeReplaysState: Contract = {
   id: 'transport.subscribe_replays_state',
   specSection: '§3.1.6',
-  description:
-    'tasks/resubscribe first event reflects the subscribed task state.',
+  description: 'tasks/resubscribe first event reflects the subscribed task state.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -350,11 +334,7 @@ export const subscribeReplaysState: Contract = {
     if (!seed) return 'skipped — agent did not return a Task';
     let events;
     try {
-      events = await streamSseEvents(
-        agentUrl,
-        'tasks/resubscribe',
-        { id: seed.id },
-      );
+      events = await streamSseEvents(agentUrl, 'tasks/resubscribe', { id: seed.id });
     } catch (err) {
       if (err instanceof SseFormatError) {
         return 'skipped — tasks/resubscribe did not return SSE';
@@ -373,23 +353,17 @@ export const subscribeReplaysState: Contract = {
     }
     const su = first.statusUpdate as Record<string, unknown> | undefined;
     if (su) {
-      maybeAssert(
-        su.taskId === seed.id,
-        'first statusUpdate.taskId ≠ subscribed id',
-      );
+      maybeAssert(su.taskId === seed.id, 'first statusUpdate.taskId ≠ subscribed id');
       return;
     }
-    throw new Error(
-      `first tasks/resubscribe event carries neither task nor statusUpdate`,
-    );
+    throw new Error(`first tasks/resubscribe event carries neither task nor statusUpdate`);
   },
 };
 
 export const subscribeNotFound: Contract = {
   id: 'transport.subscribe_not_found',
   specSection: '§3.1.6',
-  description:
-    'tasks/resubscribe on unknown id returns TaskNotFoundError.',
+  description: 'tasks/resubscribe on unknown id returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -414,8 +388,7 @@ export const subscribeNotFound: Contract = {
 export const subscribeCapabilityRequired: Contract = {
   id: 'transport.subscribe_capability_required',
   specSection: '§3.1.6',
-  description:
-    'tasks/resubscribe returns -32004 when streaming=false.',
+  description: 'tasks/resubscribe returns -32004 when streaming=false.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -427,9 +400,7 @@ export const subscribeCapabilityRequired: Contract = {
       id: crypto.randomUUID(),
     });
     if ('result' in env && !env.error) {
-      throw new Error(
-        'agent advertises streaming=false but tasks/resubscribe returned a result',
-      );
+      throw new Error('agent advertises streaming=false but tasks/resubscribe returned a result');
     }
     const error = (env.error ?? {}) as Record<string, unknown>;
     if (error.code === -32004) return;
@@ -446,11 +417,10 @@ async function setPushConfig(
   taskId: string,
   url: string,
 ): Promise<{ id: string | null; skipped: string | null }> {
-  const env = await callMethod(
-    agentUrl,
-    'tasks/pushNotificationConfig/set',
-    { taskId, pushNotificationConfig: { url } },
-  );
+  const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
+    taskId,
+    pushNotificationConfig: { url },
+  });
   const error = env.error as Record<string, unknown> | undefined;
   if (error?.code === -32601) {
     return {
@@ -458,16 +428,17 @@ async function setPushConfig(
       skipped: 'skipped — agent does not implement pushNotificationConfig/set',
     };
   }
-  const cfg = (((env.result as Record<string, unknown>) ?? {})
-    .pushNotificationConfig ?? null) as Record<string, unknown> | null;
+  const cfg = ((env.result as Record<string, unknown>)?.pushNotificationConfig ?? null) as Record<
+    string,
+    unknown
+  > | null;
   return { id: typeof cfg?.id === 'string' ? cfg.id : null, skipped: null };
 }
 
 export const pushSetPersists: Contract = {
   id: 'transport.push_set_persists',
   specSection: '§3.1.7',
-  description:
-    'pushNotificationConfig/set returns the stored config with id.',
+  description: 'pushNotificationConfig/set returns the stored config with id.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -475,23 +446,20 @@ export const pushSetPersists: Contract = {
     if (skip) return skip;
     const seed = await probeForTask(agentUrl);
     if (!seed) return 'skipped — agent did not return a Task';
-    const url = 'https://example.invalid/wh/' + crypto.randomUUID();
-    const env = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/set',
-      { taskId: seed.id, pushNotificationConfig: { url } },
-    );
+    const url = `https://example.invalid/wh/${crypto.randomUUID()}`;
+    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
+      taskId: seed.id,
+      pushNotificationConfig: { url },
+    });
     const error = env.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/set';
     }
     const result = env.result as Record<string, unknown> | undefined;
-    maybeAssert(
-      typeof result === 'object' && result !== null,
-      'set MUST return result object',
-    );
-    const cfg = (result as { pushNotificationConfig?: unknown })
-      .pushNotificationConfig as Record<string, unknown> | undefined;
+    maybeAssert(typeof result === 'object' && result !== null, 'set MUST return result object');
+    const cfg = (result as { pushNotificationConfig?: unknown }).pushNotificationConfig as
+      | Record<string, unknown>
+      | undefined;
     maybeAssert(
       typeof cfg === 'object' && cfg !== null,
       'result.pushNotificationConfig MUST be present',
@@ -500,18 +468,14 @@ export const pushSetPersists: Contract = {
       cfg.url === url,
       `set returned url ${JSON.stringify(cfg.url)}; expected ${JSON.stringify(url)}`,
     );
-    maybeAssert(
-      typeof cfg.id === 'string' && cfg.id,
-      'config id MUST be assigned',
-    );
+    maybeAssert(typeof cfg.id === 'string' && cfg.id, 'config id MUST be assigned');
   },
 };
 
 export const pushGetReturnsConfig: Contract = {
   id: 'transport.push_get_returns_config',
   specSection: '§3.1.8',
-  description:
-    'pushNotificationConfig/get retrieves the stored config.',
+  description: 'pushNotificationConfig/get retrieves the stored config.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -519,35 +483,38 @@ export const pushGetReturnsConfig: Contract = {
     if (skip) return skip;
     const seed = await probeForTask(agentUrl);
     if (!seed) return 'skipped — agent did not return a Task';
-    const url = 'https://example.invalid/wh/' + crypto.randomUUID();
+    const url = `https://example.invalid/wh/${crypto.randomUUID()}`;
     const set = await setPushConfig(agentUrl, seed.id, url);
     if (set.skipped) return set.skipped;
     if (!set.id) throw new Error('set did not return a config id');
-    const env = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/get',
-      { taskId: seed.id, pushNotificationConfigId: set.id },
-    );
+    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/get', {
+      taskId: seed.id,
+      pushNotificationConfigId: set.id,
+    });
     const error = env.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/get';
     }
-    const cfg = (((env.result as Record<string, unknown>) ?? {})
-      .pushNotificationConfig ?? null) as Record<string, unknown> | null;
+    const cfg = ((env.result as Record<string, unknown>)?.pushNotificationConfig ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    maybeAssert(typeof cfg === 'object' && cfg !== null, 'get MUST return pushNotificationConfig');
     maybeAssert(
-      typeof cfg === 'object' && cfg !== null,
-      'get MUST return pushNotificationConfig',
+      cfg.id === set.id,
+      `get id ${JSON.stringify(cfg.id)} ≠ stored ${JSON.stringify(set.id)}`,
     );
-    maybeAssert(cfg.id === set.id, `get id ${JSON.stringify(cfg.id)} ≠ stored ${JSON.stringify(set.id)}`);
-    maybeAssert(cfg.url === url, `get url ${JSON.stringify(cfg.url)} ≠ stored ${JSON.stringify(url)}`);
+    maybeAssert(
+      cfg.url === url,
+      `get url ${JSON.stringify(cfg.url)} ≠ stored ${JSON.stringify(url)}`,
+    );
   },
 };
 
 export const pushListReturnsAll: Contract = {
   id: 'transport.push_list_returns_all',
   specSection: '§3.1.9',
-  description:
-    'pushNotificationConfig/list returns every stored config.',
+  description: 'pushNotificationConfig/list returns every stored config.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -566,11 +533,9 @@ export const pushListReturnsAll: Contract = {
       if (!set.id) throw new Error('set did not return id');
       ids.push(set.id);
     }
-    const env = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/list',
-      { taskId: seed.id },
-    );
+    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/list', {
+      taskId: seed.id,
+    });
     const error = env.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/list';
@@ -586,10 +551,7 @@ export const pushListReturnsAll: Contract = {
         .filter((id): id is string => typeof id === 'string'),
     );
     for (const id of ids) {
-      maybeAssert(
-        listed.has(id),
-        `list omitted previously-set config ${id}`,
-      );
+      maybeAssert(listed.has(id), `list omitted previously-set config ${id}`);
     }
   },
 };
@@ -597,8 +559,7 @@ export const pushListReturnsAll: Contract = {
 export const pushDeleteRemoves: Contract = {
   id: 'transport.push_delete_removes',
   specSection: '§3.1.10',
-  description:
-    'pushNotificationConfig/delete removes the config from list.',
+  description: 'pushNotificationConfig/delete removes the config from list.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -609,24 +570,21 @@ export const pushDeleteRemoves: Contract = {
     const set = await setPushConfig(
       agentUrl,
       seed.id,
-      'https://example.invalid/wh/' + crypto.randomUUID(),
+      `https://example.invalid/wh/${crypto.randomUUID()}`,
     );
     if (set.skipped) return set.skipped;
     if (!set.id) throw new Error('set did not return id');
-    const del = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/delete',
-      { taskId: seed.id, pushNotificationConfigId: set.id },
-    );
+    const del = await callMethod(agentUrl, 'tasks/pushNotificationConfig/delete', {
+      taskId: seed.id,
+      pushNotificationConfigId: set.id,
+    });
     const error = del.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/delete';
     }
-    const list = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/list',
-      { taskId: seed.id },
-    );
+    const list = await callMethod(agentUrl, 'tasks/pushNotificationConfig/list', {
+      taskId: seed.id,
+    });
     const listError = list.error as Record<string, unknown> | undefined;
     if (listError?.code === -32601) return;
     const result = list.result as Record<string, unknown>;
@@ -635,33 +593,27 @@ export const pushDeleteRemoves: Contract = {
       (result?.configs as unknown[] | undefined) ??
       [];
     const listed = new Set(
-      configs.map((c) => (c as { id?: unknown })?.id).filter((id): id is string => typeof id === 'string'),
+      configs
+        .map((c) => (c as { id?: unknown })?.id)
+        .filter((id): id is string => typeof id === 'string'),
     );
-    maybeAssert(
-      !listed.has(set.id),
-      `deleted config ${set.id} still in list response`,
-    );
+    maybeAssert(!listed.has(set.id), `deleted config ${set.id} still in list response`);
   },
 };
 
 export const pushSetTaskNotFound: Contract = {
   id: 'transport.push_set_task_not_found',
   specSection: '§3.1.7',
-  description:
-    'pushNotificationConfig/set on unknown taskId returns TaskNotFoundError.',
+  description: 'pushNotificationConfig/set on unknown taskId returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
     const skip = pushSkipDetail(card);
     if (skip) return skip;
-    const env = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/set',
-      {
-        taskId: crypto.randomUUID(),
-        pushNotificationConfig: { url: 'https://example.invalid/wh' },
-      },
-    );
+    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
+      taskId: crypto.randomUUID(),
+      pushNotificationConfig: { url: 'https://example.invalid/wh' },
+    });
     const error = env.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/set';
@@ -677,21 +629,16 @@ export const pushSetTaskNotFound: Contract = {
 export const pushGetTaskNotFound: Contract = {
   id: 'transport.push_get_task_not_found',
   specSection: '§3.1.8',
-  description:
-    'pushNotificationConfig/get on unknown taskId returns TaskNotFoundError.',
+  description: 'pushNotificationConfig/get on unknown taskId returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
     const skip = pushSkipDetail(card);
     if (skip) return skip;
-    const env = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/get',
-      {
-        taskId: crypto.randomUUID(),
-        pushNotificationConfigId: crypto.randomUUID(),
-      },
-    );
+    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/get', {
+      taskId: crypto.randomUUID(),
+      pushNotificationConfigId: crypto.randomUUID(),
+    });
     const error = env.error as Record<string, unknown> | undefined;
     if (error?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/get';
@@ -707,8 +654,7 @@ export const pushGetTaskNotFound: Contract = {
 export const pushFiresOnCompletion: Contract = {
   id: 'transport.push_fires_on_completion',
   specSection: '§3.5',
-  description:
-    'Agent POSTs the Task to a registered push URL on completion.',
+  description: 'Agent POSTs the Task to a registered push URL on completion.',
   category: 'transport',
   async verify(agentUrl) {
     const card = await fetchCardJson(agentUrl);
@@ -735,7 +681,7 @@ export const pushFiresOnCompletion: Contract = {
         method: 'message/send',
         params: {
           message: {
-            messageId: 'pfc-' + crypto.randomUUID(),
+            messageId: `pfc-${crypto.randomUUID()}`,
             role: 'user',
             parts: [{ kind: 'text', text: 'count: 8 push' }],
           },
@@ -744,18 +690,15 @@ export const pushFiresOnCompletion: Contract = {
       }),
     });
     const sendBody = (await sendRes.json()) as Record<string, unknown>;
-    const fresh = sendBody.result as
-      | { id?: string; status?: { state?: string } }
-      | undefined;
+    const fresh = sendBody.result as { id?: string; status?: { state?: string } } | undefined;
     if (!fresh?.id) return 'skipped — message/send did not return Task';
     if (fresh.status && TERMINAL_TASK_STATES.has(fresh.status.state ?? '')) {
       return 'skipped — agent ignored blocking=false (task already terminal)';
     }
-    const set = await callMethod(
-      agentUrl,
-      'tasks/pushNotificationConfig/set',
-      { taskId: fresh.id, pushNotificationConfig: { url: webhook } },
-    );
+    const set = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
+      taskId: fresh.id,
+      pushNotificationConfig: { url: webhook },
+    });
     const setError = set.error as Record<string, unknown> | undefined;
     if (setError?.code === -32601) {
       return 'skipped — agent does not implement pushNotificationConfig/set';

@@ -37,9 +37,7 @@ export async function runConformanceChunk(
   return out;
 }
 
-export async function runConformanceSweep(
-  agentUrl: string,
-): Promise<ContractResult[]> {
+export async function runConformanceSweep(agentUrl: string): Promise<ContractResult[]> {
   // Drop every per-sweep cache (AgentCard today, plus anything else
   // helpers register later) so a fresh sweep sees current agent state.
   clearAllSweepCaches();
@@ -50,10 +48,7 @@ export async function runConformanceSweep(
   return results;
 }
 
-async function runOne(
-  contract: Contract,
-  agentUrl: string,
-): Promise<ContractResult> {
+async function runOne(contract: Contract, agentUrl: string): Promise<ContractResult> {
   try {
     const detail = await contract.verify(agentUrl);
     const detailStr = typeof detail === 'string' ? detail : '';

@@ -23,10 +23,11 @@ interface CapabilityProbeOpts {
 async function runCapabilityProbe(
   agentUrl: string,
   opts: CapabilityProbeOpts,
-): Promise<void | string> {
+): Promise<undefined | string> {
   const { body: card } = await fetchCard(agentUrl);
-  const claim = (card as { capabilities?: Record<string, unknown> })
-    ?.capabilities?.[opts.capabilityKey];
+  const claim = (card as { capabilities?: Record<string, unknown> })?.capabilities?.[
+    opts.capabilityKey
+  ];
   if (claim === true) {
     return opts.capabilityClaimedTrueDetail;
   }
@@ -91,14 +92,12 @@ export const streamingCapabilityConsistency: Contract = {
 export const pushNotificationsCapabilityConsistency: Contract = {
   id: 'transport.push_notifications_capability_consistency',
   specSection: '§3.5',
-  description:
-    'Push config returns -32003 when pushNotifications=false.',
+  description: 'Push config returns -32003 when pushNotifications=false.',
   category: 'transport',
   verify: (agentUrl) =>
     runCapabilityProbe(agentUrl, {
       capabilityKey: 'pushNotifications',
-      capabilityClaimedTrueDetail:
-        'skipped — agent advertises pushNotifications=true',
+      capabilityClaimedTrueDetail: 'skipped — agent advertises pushNotifications=true',
       expectedCode: -32003,
       expectedCodeName: 'PushNotificationNotSupportedError',
       method: 'tasks/pushNotificationConfig/set',
@@ -116,14 +115,12 @@ export const pushNotificationsCapabilityConsistency: Contract = {
 export const extendedCardCapabilityConsistency: Contract = {
   id: 'transport.extended_card_capability_consistency',
   specSection: '§3.1.7',
-  description:
-    'Extended-card op returns -32004 when extendedAgentCard=false.',
+  description: 'Extended-card op returns -32004 when extendedAgentCard=false.',
   category: 'transport',
   verify: (agentUrl) =>
     runCapabilityProbe(agentUrl, {
       capabilityKey: 'extendedAgentCard',
-      capabilityClaimedTrueDetail:
-        'skipped — agent advertises extendedAgentCard=true',
+      capabilityClaimedTrueDetail: 'skipped — agent advertises extendedAgentCard=true',
       expectedCode: -32004,
       expectedCodeName: 'UnsupportedOperationError',
       method: 'agent/getAuthenticatedExtendedCard',

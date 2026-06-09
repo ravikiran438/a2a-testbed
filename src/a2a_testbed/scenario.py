@@ -47,7 +47,6 @@ from a2a_testbed.runtimes import (
     NodejsRuntime,
     PythonInProcRuntime,
     PythonSubprocRuntime,
-    RuntimeUnavailable,
 )
 from a2a_testbed.transport import A2ATransport, Transport, WireMessage
 
@@ -84,9 +83,7 @@ def scripts_from_steps(steps: Iterable[Step]) -> dict[str, dict[str, str]]:
         if not step.action:
             continue
         bucket = out.setdefault(step.to, {})
-        bucket.setdefault(
-            step.action, f"[{step.to}] handled action: {step.action}"
-        )
+        bucket.setdefault(step.action, f"[{step.to}] handled action: {step.action}")
     return out
 
 
@@ -145,6 +142,8 @@ class ScenarioRunner:
         log_level: str = "warning",
         transport: Optional[Transport] = None,
         probe_external: bool = False,
+        acs_manifest_path: Optional[Union[str, Path]] = None,
+        acs_enforce: Optional[bool] = None,
     ) -> None:
         self._timeout = http_timeout
         self._log_level = log_level
@@ -155,6 +154,18 @@ class ScenarioRunner:
         # TOS are out of our hands and we'd be impolite to spray a
         # 23-probe sweep at them on every scenario run.
         self._probe_external = probe_external
+        # Optional ACS manifest path supplied via `--acs`. Overrides
+        # any `acs:` field declared in the scenario. Resolved + loaded
+        # in ``run`` once the scenario directory is known.
+        self._acs_manifest_path = acs_manifest_path
+        # Enforce-mode override from the `--acs-enforce` flag. None means
+        # "defer to the scenario's `acs_enforce:` field".
+        self._acs_enforce_override = acs_enforce
+        # Populated per-run: the loaded manifest + a fail-closed
+        # evaluator, or None when the scenario has no ACS governance.
+        self._acs = None
+        # Effective enforce flag for the current run (resolved in `run`).
+        self._acs_enforce = False
 
     async def run_file(self, scenario_path: Union[str, Path]) -> ScenarioResult:
         scenario = load_scenario(scenario_path)
@@ -168,11 +179,61 @@ class ScenarioRunner:
         scenario_dir: Optional[Path] = None,
     ) -> ScenarioResult:
         scenario_dir = scenario_dir or Path.cwd()
+        self._acs = self._load_acs(scenario, scenario_dir)
+        # Resolve enforce mode: explicit flag wins, else the scenario field.
+        self._acs_enforce = (
+            self._acs_enforce_override
+            if self._acs_enforce_override is not None
+            else bool(scenario.acs_enforce)
+        )
         if scenario.mode == NetworkMode.SIM:
             return await self._run_sim(scenario, scenario_dir)
         if scenario.mode == NetworkMode.REALISTIC:
             return await self._run_realistic(scenario, scenario_dir)
         raise NotImplementedError(f"unknown network mode {scenario.mode!r}")
+
+    def _load_acs(self, scenario: Scenario, scenario_dir: Path):
+        """Resolve + load the ACS manifest for this run, if any.
+
+        Precedence: the ``--acs`` path passed to the runner overrides
+        the scenario's ``acs:`` field. Returns a ``(manifest, evaluator)``
+        tuple or ``None``. A fail-closed evaluator is built and no-op
+        evidence providers are registered for every evidence id the
+        manifest declares, so the *policy* logic is what's exercised in
+        a scenario run (fail-closed-under-fault is covered separately by
+        the policy contracts + unit tests).
+        """
+        raw_path = self._acs_manifest_path or scenario.acs
+        if not raw_path:
+            return None
+
+        from a2a_testbed.acs import AcsEvaluator, validate_manifest
+
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = (scenario_dir / path).resolve()
+        result = validate_manifest(path)
+        if result.manifest is None or not result.ok:
+            problems = "; ".join(f.detail for f in result.findings if f.is_error)
+            raise ScenarioLoadError(f"invalid ACS manifest {path}: {problems}")
+
+        manifest = result.manifest
+        evaluator = AcsEvaluator(fail_closed=True)
+
+        from a2a_testbed.acs.evidence import BUILTIN_EVIDENCE_PROVIDERS
+
+        async def _noop_evidence(_canonical):
+            return {}
+
+        # Register a real built-in provider when the manifest references a
+        # known evidence id (e.g. `keyword_dlp`); otherwise a permissive
+        # no-op so the policy logic still runs rather than failing closed.
+        for decl in manifest.intervention_points.values():
+            for ev_id in decl.evidence:
+                provider = BUILTIN_EVIDENCE_PROVIDERS.get(ev_id, _noop_evidence)
+                evaluator.register_evidence(ev_id, provider)
+
+        return (manifest, evaluator)
 
     async def _run_sim(self, scenario: Scenario, scenario_dir: Path) -> ScenarioResult:
         inferred = scripts_from_steps(scenario.flow)
@@ -213,20 +274,17 @@ class ScenarioRunner:
             net.attach_traffic_tap(self._make_observer_tap(observer_hub))
 
         async with net:
-            agent_url: dict[str, str] = {
-                decl.id: net.url_of(decl.id) for decl, _ in runtimes
-            }
-            scenario_result = await self._drive_flow(
-                scenario, agent_url, time_ctrl, observer_hub
-            )
+            agent_url: dict[str, str] = {decl.id: net.url_of(decl.id) for decl, _ in runtimes}
+            scenario_result = await self._drive_flow(scenario, agent_url, time_ctrl, observer_hub)
             scenario_result.contracts = await self._evaluate_contracts(
-                scenario, agent_url, scenario_result, observer_hub,
+                scenario,
+                agent_url,
+                scenario_result,
+                observer_hub,
             )
             return scenario_result
 
-    async def _run_realistic(
-        self, scenario: Scenario, scenario_dir: Path
-    ) -> ScenarioResult:
+    async def _run_realistic(self, scenario: Scenario, scenario_dir: Path) -> ScenarioResult:
         """Per-process realistic mode: each agent gets its own HTTP server.
 
         Used for cross-SDK conformance and production-topology validation.
@@ -255,15 +313,11 @@ class ScenarioRunner:
 
         async with net:
             agent_url = net.urls()
-            scenario_result = await self._drive_flow(
-                scenario, agent_url, time_ctrl, observer_hub
-            )
+            scenario_result = await self._drive_flow(scenario, agent_url, time_ctrl, observer_hub)
             # Build a per-agent runtime-kind map so the contract
             # evaluator can skip external agents (we don't probe
             # third-party deployments without explicit opt-in).
-            runtime_by_id = {
-                decl.id: decl.runtime for decl, _ in runtimes
-            }
+            runtime_by_id = {decl.id: decl.runtime for decl, _ in runtimes}
             scenario_result.contracts = await self._evaluate_contracts(
                 scenario,
                 agent_url,
@@ -287,10 +341,20 @@ class ScenarioRunner:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             for index, step in enumerate(scenario.flow):
                 result = await self._run_step(
-                    client, agent_url, time_ctrl, observer_hub, index, step,
+                    client,
+                    agent_url,
+                    time_ctrl,
+                    observer_hub,
+                    index,
+                    step,
                 )
                 observer_hub.record(index, step, result)
                 results.append(result)
+                # Enforce mode: a blocked handoff halts the remaining
+                # flow, mirroring a real control layer stopping the
+                # workflow at the denied action.
+                if self._acs_enforce and result.acs_blocked:
+                    break
 
         finished_at = datetime.now(timezone.utc)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -335,10 +399,7 @@ class ScenarioRunner:
 
         # Transport contracts — per agent.
         for agent_id, url in agent_url.items():
-            if (
-                runtime_by_id.get(agent_id) == RuntimeKind.EXTERNAL
-                and not self._probe_external
-            ):
+            if runtime_by_id.get(agent_id) == RuntimeKind.EXTERNAL and not self._probe_external:
                 # Skip third-party deployments by default; their CORS
                 # allowlist / rate limit / TOS are out of our hands.
                 # Pass --probe-external on `run` (or use the
@@ -368,7 +429,9 @@ class ScenarioRunner:
         # Network contracts — multi-agent flow invariants. Always run.
         try:
             net_results = await run_network_contracts(
-                scenario, scenario_result, observer_hub,
+                scenario,
+                scenario_result,
+                observer_hub,
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("network-contract evaluation failed: %s", exc)
@@ -390,6 +453,7 @@ class ScenarioRunner:
     @staticmethod
     def _make_observer_tap(observer_hub: ObserverHub):
         """Build a network traffic tap that funnels into the observer hub."""
+
         def tap(receiver_id: str, request_body: dict, response_body: dict) -> None:
             observer_hub.record_wire(
                 WireExchange(
@@ -398,6 +462,7 @@ class ScenarioRunner:
                     response_body=response_body,
                 )
             )
+
         return tap
 
     async def _run_step(
@@ -440,12 +505,16 @@ class ScenarioRunner:
         # SEND
         if not step.to:
             return StepResult(
-                step_index=index, step=step, passed=False,
+                step_index=index,
+                step=step,
+                passed=False,
                 detail="step kind=send requires `to`",
             )
         if step.to not in agent_url:
             return StepResult(
-                step_index=index, step=step, passed=False,
+                step_index=index,
+                step=step,
+                passed=False,
                 detail=f"unknown receiver agent {step.to!r}",
             )
 
@@ -461,25 +530,53 @@ class ScenarioRunner:
             },
         )
         payload = self._transport.encode_request(wire)
+
+        # ACS PRE-dispatch checkpoints (input / pre_tool_call). In
+        # enforce mode a blocking verdict (deny / escalate) stops the
+        # handoff *before* it is sent — the request never goes out.
+        pre_verdicts = await self._evaluate_acs(step, payload, None, phase="pre")
+        if self._acs_enforce and self._has_block(pre_verdicts):
+            return StepResult(
+                step_index=index,
+                step=step,
+                passed=False,
+                detail=f"blocked by ACS before dispatch: {self._block_reason(pre_verdicts)}",
+                acs_verdicts=pre_verdicts,
+                acs_blocked=True,
+            )
+
         t0 = time.perf_counter()
         try:
             response = await apply_fault(step.fault, "POST", url, payload, client)
         except DroppedRequest:
             return StepResult(
-                step_index=index, step=step, passed=False,
+                step_index=index,
+                step=step,
+                passed=False,
                 detail="fault: drop (no response)",
                 elapsed_ms=(time.perf_counter() - t0) * 1000.0,
+                acs_verdicts=pre_verdicts,
             )
         except httpx.HTTPError as exc:
             return StepResult(
-                step_index=index, step=step, passed=False,
+                step_index=index,
+                step=step,
+                passed=False,
                 detail=f"HTTP error: {exc}",
                 elapsed_ms=(time.perf_counter() - t0) * 1000.0,
+                acs_verdicts=pre_verdicts,
             )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         body_excerpt = self._excerpt(response.text)
         passed, detail = self._evaluate(step.expect, response, body_excerpt)
+        # ACS POST-dispatch checkpoints (post_tool_call / output).
+        post_verdicts = await self._evaluate_acs(step, payload, response, phase="post")
+        all_verdicts = pre_verdicts + post_verdicts
+        blocked = self._acs_enforce and self._has_block(all_verdicts)
+        if blocked:
+            passed = False
+            detail = f"{detail} | blocked by ACS: {self._block_reason(all_verdicts)}"
         return StepResult(
             step_index=index,
             step=step,
@@ -488,7 +585,74 @@ class ScenarioRunner:
             response_status=response.status_code,
             response_body_excerpt=body_excerpt,
             elapsed_ms=elapsed_ms,
+            acs_verdicts=all_verdicts,
+            acs_blocked=blocked,
         )
+
+    # Decisions that block the action in enforce mode. ``escalate`` is
+    # "blocked pending human approval" — for an automated run we treat
+    # it as a block too.
+    _BLOCKING_DECISIONS = frozenset({"deny", "escalate"})
+
+    @classmethod
+    def _has_block(cls, verdicts: list[dict]) -> bool:
+        return any(v.get("decision") in cls._BLOCKING_DECISIONS for v in verdicts)
+
+    @staticmethod
+    def _block_reason(verdicts: list[dict]) -> str:
+        for v in verdicts:
+            if v.get("decision") in ScenarioRunner._BLOCKING_DECISIONS:
+                why = "; ".join(v.get("reasons") or []) or v.get("rule_name") or "policy"
+                return f"{v.get('intervention_point')}={v.get('decision')} ({why})"
+        return "policy"
+
+    async def _evaluate_acs(
+        self, step: Step, payload: dict, response, *, phase: str = "post"
+    ) -> list[dict]:
+        """Evaluate the active ACS manifest against this step's exchange.
+
+        ``phase`` selects which intervention points run:
+
+        - ``"pre"``  : request-side points (``input`` / ``pre_tool_call``),
+          evaluated *before* the request is dispatched so enforce mode can
+          block it. ``response`` is ignored.
+        - ``"post"`` : response-side points (``post_tool_call`` / ``output``),
+          evaluated after the response is received.
+
+        Returns the serialized verdicts; empty when no ACS manifest is active.
+        """
+        if self._acs is None:
+            return []
+        manifest, evaluator = self._acs
+
+        from a2a_testbed.acs import InterventionPoint, snapshot_for
+        from a2a_testbed.core.observer import WireExchange
+
+        if phase == "pre":
+            wanted = {InterventionPoint.INPUT, InterventionPoint.PRE_TOOL_CALL}
+            response_body: dict = {}
+        else:
+            wanted = {InterventionPoint.POST_TOOL_CALL, InterventionPoint.OUTPUT}
+            try:
+                parsed = json.loads(response.text) if response.text else {}
+            except json.JSONDecodeError:
+                parsed = {}
+            response_body = parsed if isinstance(parsed, dict) else {"result": parsed}
+
+        exchange = WireExchange(
+            receiver_id=step.to or "",
+            request_body=payload,
+            response_body=response_body,
+        )
+
+        verdicts: list[dict] = []
+        for point in manifest.intervention_points:
+            if point not in wanted:
+                continue
+            snapshot = snapshot_for(point, exchange, tools=manifest.tools)
+            verdict = await evaluator.evaluate(manifest, point, snapshot)
+            verdicts.append(verdict.model_dump(mode="json"))
+        return verdicts
 
     @staticmethod
     def _build_send_message_request_LEGACY(step: Step) -> dict:
@@ -553,6 +717,13 @@ async def run_scenario_file(
     *,
     log_level: str = "warning",
     probe_external: bool = False,
+    acs: Optional[Union[str, Path]] = None,
+    acs_enforce: Optional[bool] = None,
 ) -> ScenarioResult:
-    runner = ScenarioRunner(log_level=log_level, probe_external=probe_external)
+    runner = ScenarioRunner(
+        log_level=log_level,
+        probe_external=probe_external,
+        acs_manifest_path=acs,
+        acs_enforce=acs_enforce,
+    )
     return await runner.run_file(path)

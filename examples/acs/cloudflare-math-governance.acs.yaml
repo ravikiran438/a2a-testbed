@@ -1,0 +1,62 @@
+# ACS governance for the LIVE Cloudflare math agent (math.a2a-testbed.com).
+#
+# This manifest is evaluated against REAL wire traffic — the actual
+# request the runner sends to the deployed worker and the actual JSON-RPC
+# response it returns — not synthetic placeholders. It exercises both
+# halves of the ACS pipeline against reality:
+#
+#   - pre_tool_call: the `keyword_dlp` evidence provider scans the
+#     outbound question; the policy denies if sensitive content is found.
+#   - output: the response policy inspects the real response body and
+#     warns if the agent returned a JSON-RPC error.
+#
+# Used by examples/scenarios/cloudflare_math_governed.yaml.
+
+agent_control_specification_version: "0.3.1-beta"
+
+metadata:
+  name: "cloudflare-math-governance"
+  description: "Govern the live math agent: DLP on requests, error-check on responses."
+
+policies:
+  request_policy:
+    type: builtin
+    default_decision: allow
+    rules:
+      - name: deny-sensitive-question
+        field: "annotations.dlp.flagged"   # set by keyword_dlp evidence
+        op: equals
+        value: true
+        decision: deny
+        description: "DLP flagged sensitive content in the outbound question"
+
+  response_policy:
+    type: builtin
+    default_decision: allow
+    rules:
+      - name: warn-error-response
+        field: "snapshot.response.error"
+        op: exists
+        decision: warn
+        description: "math agent returned a JSON-RPC error"
+
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy: request_policy
+    evidence:
+      - keyword_dlp
+
+  output:
+    policy: response_policy
+    policy_target: "$.output"
+    policy_target_kind: output
+
+tools:
+  math:
+    type: Tool
+    id: math
+    clearance: external
+    security_labels: [external]

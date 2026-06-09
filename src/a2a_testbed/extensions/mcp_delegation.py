@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
@@ -132,15 +132,12 @@ class _MalformedToolResponse(Exception):
 
     def __init__(self, raw_text: str) -> None:
         super().__init__(
-            "MCP tool returned non-JSON or unexpected payload: "
-            + (raw_text[:200] or "(empty)")
+            "MCP tool returned non-JSON or unexpected payload: " + (raw_text[:200] or "(empty)")
         )
         self.raw_text = raw_text
 
 
-async def _call_mcp_tool(
-    delegate: MCPDelegate, payload: dict[str, Any]
-) -> tuple[bool, str]:
+async def _call_mcp_tool(delegate: MCPDelegate, payload: dict[str, Any]) -> tuple[bool, str]:
     """Spawn the MCP server, call the validator tool, return (ok, raw_text).
 
     Raises on transport errors so the caller can surface

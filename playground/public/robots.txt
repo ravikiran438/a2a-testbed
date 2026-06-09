@@ -1,18 +1,58 @@
 # a2a-testbed public crawl policy.
 #
-# The site is a single-page app at https://a2a-testbed.com/ . There
-# are no auth-walled pages, no user-generated content, and no
-# private routes — everything ships as static assets.
+# The site is a single-page app at https://a2a-testbed.com/ . There are no
+# auth-walled pages, no user-generated content, and no private routes —
+# everything ships as static assets, so crawling is welcome.
 #
-# We allow well-behaved crawlers everywhere, point them at the
-# sitemap, and ask aggressive crawlers (especially LLM scrapers
-# that don't honor sampling intent) to slow down. This isn't
-# enforcement — bots that ignore robots.txt still hit the site —
-# the Cloudflare layer in front of the live agent (CORS allowlist
-# + per-IP rate limit) is what actually defends the LLM endpoint.
+# AI / LLM crawlers are explicitly allowed: much of this project's audience
+# discovers tooling through AI assistants rather than search engines. For a
+# concise, link-rich overview built for LLMs, see /llms.txt .
+#
+# Note: robots.txt is advisory. The Cloudflare layer in front of the live
+# LLM agent (CORS allowlist + per-IP rate limit) is what actually defends
+# that endpoint.
 
 User-agent: *
 Allow: /
-Crawl-delay: 5
 
 Sitemap: https://a2a-testbed.com/sitemap.xml
+
+# --- AI / LLM crawlers (search + training + assistant retrieval) ---
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /

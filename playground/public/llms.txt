@@ -1,0 +1,44 @@
+# a2a-testbed
+
+> a2a-testbed is a polyglot, multi-agent testbed for the **Agent2Agent (A2A)**
+> protocol, with first-class support for the **Agent Control Specification
+> (ACS)** runtime-governance standard. It runs scripted multi-agent scenarios
+> across Python, Go, Node.js, and Java agents over real HTTP + JSON-RPC;
+> validates AgentCards and extension manifests; checks A2A 1.0 conformance
+> with spec-cited contracts; and validates + enforces ACS manifests (allow /
+> warn / deny / escalate verdicts with fail-closed enforcement) in both a
+> Python CLI and an in-browser playground. Live at https://a2a-testbed.com,
+> open source under Apache-2.0.
+
+## What it does
+
+- **Multi-agent scenarios** — declare A2A agents as JSON AgentCards, drive message flows from YAML, exercise real wire traffic end-to-end.
+- **A2A 1.0 conformance** — 58 transport contracts + network contracts, each citing the A2A spec section, runnable against any deployed agent.
+- **AgentCard + extension validation** — validate `capabilities.extensions[]` payloads against published JSON-Schema manifests.
+- **ACS runtime governance** — validate ACS manifests, map their eight intervention points onto the A2A wire seam, and enforce verdicts (block a denied handoff before dispatch). Builtin + OPA/Rego policy engines, evidence providers (DLP), fail-closed semantics.
+- **Polyglot runtimes** — Python, Go, Node.js, Java subprocess agents in one scenario; fault injection, virtual time control, an observer pattern.
+- **ASSERT integration** — drive an A2A agent through Microsoft's ASSERT eval pipeline with ACS verdicts as judge evidence.
+
+## a2a-testbed docs
+
+- [README](https://github.com/ravikiran438/a2a-testbed/blob/main/README.md): overview, install, quick-start commands.
+- [ACS guide (docs/ACS.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ACS.md): how ACS maps onto the A2A wire seam, manifest format, validation (CLI + browser), enforcement, evidence, Rego.
+- [Architecture (ARCHITECTURE.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/ARCHITECTURE.md): three-layer design, runtimes, conformance subsystem, two-surfaces parity.
+- [Source repository](https://github.com/ravikiran438/a2a-testbed): full source, examples, tests.
+- [Live playground](https://a2a-testbed.com): in-browser scenario runner, AgentCard validator, ACS manifest validator.
+
+## Standards and related work
+
+- [Agent2Agent (A2A) protocol](https://a2a-protocol.org/): open standard for agent-to-agent collaboration (AgentCard, Task, Message). The protocol this testbed exercises.
+- [Agent Control Specification (ACS)](https://github.com/microsoft/agent-governance-toolkit/blob/main/policy-engine/spec/SPECIFICATION.md): Microsoft's open runtime-governance standard for AI agents; the policy spec this testbed validates and enforces.
+- [Agent Governance Toolkit (AGT)](https://github.com/microsoft/agent-governance-toolkit): Microsoft's open-source runtime governance toolkit that ACS is part of.
+- [ACS announcement](https://commandline.microsoft.com/agent-control-specification-runtime-governance/): "Introducing Agent Control Specification: Portable runtime governance for AI Agents".
+- [ASSERT](https://github.com/microsoft/ASSERT): Microsoft's open-source spec-driven agent evaluation framework; a2a-testbed ships an ASSERT callable target for A2A + ACS.
+- [ASSERT docs](https://responsibleai.github.io/ASSERT/): getting started, config, targets.
+- [Model Context Protocol (MCP)](https://modelcontextprotocol.io/): open standard for agent-to-tool integration; complements A2A.
+- [Build 2026: open trust stack for AI agents](https://devblogs.microsoft.com/foundry/build-2026-open-trust-stack-ai-agents/): the Microsoft Foundry post introducing ASSERT + ACS.
+
+## Optional
+
+- [A2A specification (GitHub)](https://github.com/a2aproject/A2A): the upstream A2A spec the conformance contracts are pinned to.
+- [a2aproject/a2a-tck](https://github.com/a2aproject/a2a-tck): the official single-agent A2A compliance kit (a2a-testbed complements it with multi-agent + extension + governance testing).

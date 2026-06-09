@@ -25,10 +25,7 @@ export function CloudflareAnalytics() {
     const script = document.createElement('script');
     script.defer = true;
     script.src = 'https://static.cloudflareinsights.com/beacon.min.js';
-    script.setAttribute(
-      'data-cf-beacon',
-      JSON.stringify({ token: TOKEN, spa: true })
-    );
+    script.setAttribute('data-cf-beacon', JSON.stringify({ token: TOKEN, spa: true }));
     document.head.appendChild(script);
 
     return () => {

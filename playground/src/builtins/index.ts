@@ -11,14 +11,14 @@
 //   2. Drop its AgentCards in `examples/agent-cards/<group>/`.
 //   3. Import them with `?raw` here and append to BUILTIN_SCENARIOS.
 
-import cloudflareMathYaml from '../../../examples/scenarios/cloudflare_math_demo.yaml?raw';
-import cloudflareMathProberCard from '../../../examples/agent-cards/cloudflare-math/prober.json?raw';
 import cloudflareMathMathCard from '../../../examples/agent-cards/cloudflare-math/math.json?raw';
-import taskRunnerYaml from '../../../examples/scenarios/task_runner_demo.yaml?raw';
+import cloudflareMathProberCard from '../../../examples/agent-cards/cloudflare-math/prober.json?raw';
 import taskRunnerProberCard from '../../../examples/agent-cards/task-runner/prober.json?raw';
 import taskRunnerRunnerCard from '../../../examples/agent-cards/task-runner/runner.json?raw';
-import timeAdvanceYaml from '../../../examples/scenarios/time_advance.yaml?raw';
 import timeAdvanceCarolCard from '../../../examples/agent-cards/three-party/carol.json?raw';
+import cloudflareMathYaml from '../../../examples/scenarios/cloudflare_math_demo.yaml?raw';
+import taskRunnerYaml from '../../../examples/scenarios/task_runner_demo.yaml?raw';
+import timeAdvanceYaml from '../../../examples/scenarios/time_advance.yaml?raw';
 
 /** A built-in scenario the user can pick from the playground dropdown. */
 export interface BuiltinScenarioDef {

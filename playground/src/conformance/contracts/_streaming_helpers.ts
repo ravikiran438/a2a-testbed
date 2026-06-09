@@ -27,7 +27,7 @@ export async function streamSseEvents(
   const url = agentUrl.replace(/\/$/, '') + RPC_PATH;
   const req = {
     jsonrpc: '2.0',
-    id: 'sse-' + Math.random().toString(36).slice(2, 10),
+    id: `sse-${Math.random().toString(36).slice(2, 10)}`,
     method,
     params,
   };
@@ -41,9 +41,7 @@ export async function streamSseEvents(
   });
   const ctype = res.headers.get('content-type') ?? '';
   if (!ctype.toLowerCase().includes('text/event-stream')) {
-    throw new SseFormatError(
-      `expected text/event-stream, got ${JSON.stringify(ctype)}`,
-    );
+    throw new SseFormatError(`expected text/event-stream, got ${JSON.stringify(ctype)}`);
   }
   const reader = res.body?.getReader();
   if (!reader) throw new SseFormatError('no response body to stream');
@@ -91,53 +89,39 @@ export class SseFormatError extends Error {}
  * Capability-gated skip checks. Streaming / push contracts only
  * apply when the AgentCard advertises the matching capability.
  */
-export function streamingSkipDetail(
-  card: Record<string, unknown> | null,
-): string | null {
+export function streamingSkipDetail(card: Record<string, unknown> | null): string | null {
   const caps = (card?.capabilities ?? null) as Record<string, unknown> | null;
   return caps?.streaming === true
     ? null
     : 'skipped — agent does not advertise capabilities.streaming=true';
 }
 
-export function pushSkipDetail(
-  card: Record<string, unknown> | null,
-): string | null {
+export function pushSkipDetail(card: Record<string, unknown> | null): string | null {
   const caps = (card?.capabilities ?? null) as Record<string, unknown> | null;
   return caps?.pushNotifications === true
     ? null
     : 'skipped — agent does not advertise capabilities.pushNotifications=true';
 }
 
-export async function fetchCardJson(
-  agentUrl: string,
-): Promise<Record<string, unknown>> {
+export async function fetchCardJson(agentUrl: string): Promise<Record<string, unknown>> {
   // Delegates to transport.fetchCard so the per-sweep cache is
   // shared. Streaming/push/subscribe contracts each call this for
   // capability lookup; without sharing they'd each fire a separate
   // GET against the agent.
   const { body } = await fetchCard(agentUrl);
-  return body && typeof body === 'object'
-    ? (body as Record<string, unknown>)
-    : {};
+  return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 }
 
 export function freshToken(): string {
-  return 'tok-' + crypto.randomUUID();
+  return `tok-${crypto.randomUUID()}`;
 }
 
-export async function readReceivedHooks(
-  token: string,
-): Promise<Array<Record<string, unknown>>> {
-  const res = await fetch(
-    `${PUSH_RECEIVER_BASE}/received/${encodeURIComponent(token)}`,
-  );
+export async function readReceivedHooks(token: string): Promise<Array<Record<string, unknown>>> {
+  const res = await fetch(`${PUSH_RECEIVER_BASE}/received/${encodeURIComponent(token)}`);
   if (!res.ok) return [];
   try {
     const body = (await res.json()) as { hooks?: unknown };
-    return Array.isArray(body.hooks)
-      ? (body.hooks as Array<Record<string, unknown>>)
-      : [];
+    return Array.isArray(body.hooks) ? (body.hooks as Array<Record<string, unknown>>) : [];
   } catch {
     return [];
   }
@@ -153,7 +137,7 @@ export async function callMethod(
     agentUrl,
     method,
     params,
-    'call-' + Math.random().toString(36).slice(2, 10),
+    `call-${Math.random().toString(36).slice(2, 10)}`,
   );
   return (body ?? {}) as Record<string, unknown>;
 }

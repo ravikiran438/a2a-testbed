@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "a2a-testbed"
-version = "0.1.0a1"
-description = "A polyglot, JSON-driven, multi-agent A2A network simulator with scenario runner, observer agents, time control, and failure injection."
+version = "0.2.0a1"
+description = "A polyglot, JSON-driven, multi-agent A2A network simulator with scenario runner, conformance contracts, Agent Control Specification (ACS) runtime governance, observer agents, time control, and failure injection."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -23,6 +23,8 @@ classifiers = [
 dependencies = [
     "a2a-sdk[http-server]>=1.0.1",
     "httpx>=0.28",
+    "jsonschema>=4.18",
+    "mcp>=1.0",
     "pydantic>=2.6",
     "pyyaml>=6.0",
     "starlette>=0.40",
@@ -39,6 +41,13 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+]
+# OpenTelemetry spans for the ASSERT integration target
+# (examples/assert_integration). Optional — the target degrades to a
+# plain-text response when these aren't installed.
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
 ]
 
 [project.scripts]
@@ -62,6 +71,10 @@ filterwarnings = ["ignore::DeprecationWarning"]
 markers = [
     "polyglot: tests that spawn non-Python subprocess agents (skip if toolchain absent)",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
 
 # ----------------------------------------------------------------------
 # A2A spec sync metadata.

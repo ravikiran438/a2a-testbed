@@ -3,6 +3,7 @@
 // so the same agent passes/fails the same checks in the same order
 // across the CLI and the browser surface.
 
+import type { Contract } from '../types';
 import {
   agentCardCapabilitiesObject,
   agentCardHttpsUrls,
@@ -26,10 +27,7 @@ import {
   pushNotificationsCapabilityConsistency,
   streamingCapabilityConsistency,
 } from './capabilities';
-import {
-  iso8601Timestamps,
-  jsonCamelCase,
-} from './json_serialization';
+import { iso8601Timestamps, jsonCamelCase } from './json_serialization';
 import {
   errorDataAtype,
   jsonrpcEnvelope,
@@ -73,7 +71,6 @@ import {
   tasksGetReturnsTask,
   tasksListSortedDesc,
 } from './tasks';
-import type { Contract } from '../types';
 
 export const ALL_CONTRACTS: Contract[] = [
   // AgentCard discovery + structural shape (§4.4, §8)

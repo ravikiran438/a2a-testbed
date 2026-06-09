@@ -28,11 +28,8 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -51,9 +48,9 @@ _READY_LINE = re.compile(r"A2A_TESTBED_READY:\s*(\S+)")
 class SubprocessRuntimeBase(AgentRuntime):
     """Spawn an external process that hosts the agent over HTTP."""
 
-    binary_check: list[str] = []   # subclass: command to verify toolchain (e.g. ['go','version'])
-    binary_hint: str = ""           # subclass: install-hint message
-    cmd_template: list[str] = []   # subclass: command template; gets formatted at start
+    binary_check: list[str] = []  # subclass: command to verify toolchain (e.g. ['go','version'])
+    binary_hint: str = ""  # subclass: install-hint message
+    cmd_template: list[str] = []  # subclass: command template; gets formatted at start
 
     def __init__(
         self,
@@ -88,9 +85,7 @@ class SubprocessRuntimeBase(AgentRuntime):
 
     async def start(self) -> None:
         self._verify_toolchain()
-        self._tempdir = tempfile.TemporaryDirectory(
-            prefix=f"a2a-testbed-{self._agent_id}-"
-        )
+        self._tempdir = tempfile.TemporaryDirectory(prefix=f"a2a-testbed-{self._agent_id}-")
         td = Path(self._tempdir.name)
         card_path = td / "agent-card.json"
         scripts_path = td / "scripts.json"
@@ -148,13 +143,9 @@ class SubprocessRuntimeBase(AgentRuntime):
         timeout = 30.0
         try:
             while True:
-                line = await asyncio.wait_for(
-                    self._proc.stdout.readline(), timeout=timeout
-                )
+                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=timeout)
                 if not line:
-                    raise RuntimeError(
-                        f"{self._agent_id} subprocess closed stdout before ready"
-                    )
+                    raise RuntimeError(f"{self._agent_id} subprocess closed stdout before ready")
                 decoded = line.decode("utf-8", errors="replace").strip()
                 logger.debug("[%s] %s", self._agent_id, decoded)
                 m = _READY_LINE.search(decoded)
@@ -162,6 +153,5 @@ class SubprocessRuntimeBase(AgentRuntime):
                     return m.group(1)
         except asyncio.TimeoutError as exc:
             raise RuntimeError(
-                f"{self._agent_id} subprocess did not print A2A_TESTBED_READY "
-                f"within {timeout}s"
+                f"{self._agent_id} subprocess did not print A2A_TESTBED_READY within {timeout}s"
             ) from exc

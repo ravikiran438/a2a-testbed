@@ -1,43 +1,62 @@
-# Java agent template (placeholder)
+# Java reference agent
 
-A reference Java agent for the subprocess runtime is on the roadmap
-but not yet included. The runtime adapter at
-`src/a2a_testbed/runtimes/java.py` spawns `java -jar agent.jar`
-against this directory. When a contributor adds the jar (e.g. via
-`./gradlew build`), the `runtime: java` scenario kind will work
-without orchestrator changes.
+A minimal A2A 1.0 agent for the a2a-testbed **Java subprocess runtime**,
+mirroring `agents/nodejs-template/` and `agents/go-template/`. It exists so
+the cross-SDK polyglot story includes Java: a scenario can mix a Python
+principal, a Go service, a Node.js guardian, and a Java agent in one run.
 
-## Contract a Java agent must satisfy
+JDK stdlib only (`com.sun.net.httpserver` + regex, no JSON library), so it
+builds into a single dependency-free jar.
 
-The agent process must:
+## Build
 
-1. Accept these CLI flags:
-   - `--agent-card <path>` — AgentCard JSON file
-   - `--scripts <path>` — JSON object: `{"action": "response", ...}`
-   - `--port <int>` — bind port (`0` = random)
+Either way produces `target/agent.jar`:
 
-2. Bind an HTTP server on `127.0.0.1:<port>`.
+```bash
+# Maven (recommended)
+mvn -q package
 
-3. Print exactly one line on stdout when listening:
-   ```
-   A2A_TESTBED_READY: http://127.0.0.1:<actual-port>
-   ```
+# or no-Maven, no-network
+./build.sh
+```
 
-4. Serve the AgentCard at `/.well-known/agent-card.json`.
+Requires a JDK 17+ (`javac` + `jar` on PATH).
 
-5. Accept JSON-RPC at the root path. Implement `message/send`:
-   - extract the user's text from `params.message.parts[*].text`
-   - match against the scripts map (substring, case-insensitive)
-   - return a JSON-RPC `result` containing a message with the matched
-     response (or a default fallback)
+## Use in a scenario
 
-See `agents/python-template/main.py`, `agents/nodejs-template/index.js`,
-or `agents/go-template/main.go` for ~100 LOC reference implementations.
+Point a `runtime: java` agent's `source:` at the built jar:
 
-## Recommended path
+```yaml
+agents:
+  - id: helper
+    card: ../agent-cards/helper.json
+    runtime: java
+    source: ../../agents/java-template/target/agent.jar
+    role: service_provider
+```
 
-A clean Java implementation would use the official `a2a-java` SDK (see
-the project's awesome list). For the testbed's purposes, even a stdlib
-`com.sun.net.httpserver.HttpServer` would work — the goal is exercising
-the polyglot subprocess adapter, not full A2A compliance from this
-template.
+The testbed's `JavaRuntime` adapter spawns it as:
+
+```
+java -jar <source> --agent-card <card> --scripts <scripts> --port <port>
+```
+
+The agent binds `127.0.0.1`, prints `A2A_TESTBED_READY: http://127.0.0.1:<port>`
+when listening, serves the AgentCard at
+`/.well-known/agent-card.json`, and answers JSON-RPC `message/send`:
+it extracts the message text, matches it (case-insensitive substring)
+against the `--scripts` map, and replies with
+`[<agent name>] <scripted response>`. Unknown methods return JSON-RPC
+`-32601`.
+
+## Contract (parity with the other templates)
+
+| Surface | Behaviour |
+|---|---|
+| CLI | `--agent-card`, `--scripts`, `--port` (0 = ephemeral), `--host` |
+| Ready line | `A2A_TESTBED_READY: http://<host>:<port>` on stdout |
+| `GET …/.well-known/agent-card.json` | 200, the AgentCard JSON verbatim |
+| `POST` `message/send` | `result.parts[0].text = "[<name>] <response>"` |
+| `POST` other method | JSON-RPC error `-32601` |
+
+Source: `src/main/java/com/a2atestbed/template/Main.java` (~150 LOC).

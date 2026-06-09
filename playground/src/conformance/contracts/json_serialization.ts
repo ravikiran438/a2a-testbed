@@ -26,9 +26,7 @@ function walkKeys(node: unknown, path: string, out: Array<[string, string]>): vo
     walkKeys(v, path ? `${path}.${k}` : k, out);
   }
   if (Array.isArray(node)) {
-    (node as unknown[]).forEach((v, i) =>
-      walkKeys(v, `${path}[${i}]`, out),
-    );
+    (node as unknown[]).forEach((v, i) => walkKeys(v, `${path}[${i}]`, out));
   }
 }
 

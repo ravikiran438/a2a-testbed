@@ -3,18 +3,17 @@
 
 """Transport contract: tasks/resubscribe returns an SSE stream.
 
-  Spec:    A2A 1.0 §3.1.6 (SubscribeToTask)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  ``tasks/resubscribe`` lets a client re-attach to an
-           existing Task's event stream after a disconnect. The
-           response MUST be ``Content-Type: text/event-stream`` —
-           same wire shape as ``message/stream`` per §3.1.2 — and
-           replay (or attach to) the task's update stream.
+Spec:    A2A 1.0 §3.1.6 (SubscribeToTask)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  ``tasks/resubscribe`` lets a client re-attach to an
+         existing Task's event stream after a disconnect. The
+         response MUST be ``Content-Type: text/event-stream`` —
+         same wire shape as ``message/stream`` per §3.1.2 — and
+         replay (or attach to) the task's update stream.
 """
 
 from __future__ import annotations
 
-import uuid
 
 import httpx
 
@@ -27,9 +26,7 @@ from a2a_testbed.contracts.transport._task_helpers import (
 from a2a_testbed.transport import Transport
 
 
-def make_subscribe_returns_stream_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_subscribe_returns_stream_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
         card = await fetch_card(transport, agent_url)
         skip = streaming_skip_detail(card)
@@ -72,9 +69,7 @@ def make_subscribe_returns_stream_contract(
 
     return Contract(
         id="transport.subscribe_returns_stream",
-        description=(
-            "tasks/resubscribe returns Content-Type text/event-stream (§3.1.6)"
-        ),
+        description=("tasks/resubscribe returns Content-Type text/event-stream (§3.1.6)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

@@ -1,0 +1,56 @@
+# Agent Control Specification (ACS) manifest — worked example.
+#
+# Mirrors the email-agent example from Microsoft's ACS launch, adapted
+# to the a2a-testbed wire seam: an A2A handoff to the `send_email` agent
+# is shaped as a `pre_tool_call`, and the policy denies external
+# recipients. Uses the testbed's dependency-free `builtin` policy engine
+# so it runs with no OPA/Rego backend; swap `type: builtin` for
+# `type: rego` (+ bundle/query) to delegate to an external engine.
+#
+# Validate locally:
+#   python -c "from a2a_testbed.acs import validate_manifest; \
+#     [print(f.kind.value, f.detail) for f in \
+#      validate_manifest('examples/acs/email-agent.acs.yaml').findings]"
+
+agent_control_specification_version: "0.3.1-beta"
+
+metadata:
+  name: "email-agent"
+  description: "Must not hand off email sends to external recipients."
+
+policies:
+  email_policy:
+    type: builtin
+    default_decision: allow
+    rules:
+      - name: deny-external-recipient
+        field: "tool.security_labels"        # demo: clearance/labels carried on the tool
+        op: contains
+        value: "external"
+        decision: deny
+        description: "send_email handoff carries an external label"
+      - name: deny-external-domain
+        field: "policy_target.value.message.to"
+        op: endswith
+        value: "@external.example"
+        decision: deny
+        description: "recipient address is outside the org"
+
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy: email_policy
+    # Evidence providers run before the policy; a failure here must
+    # fail closed. Register matching ids on the evaluator at runtime.
+    evidence:
+      - recipient_classifier
+
+tools:
+  send_email:
+    type: Tool
+    id: send_email
+    clearance: internal
+    security_labels:
+      - internal

@@ -161,6 +161,27 @@ than `contract-gap`; that's a higher-priority fix.
 - Cosmetic-only commits (typos, formatting) — feel free to bump
   but don't claim a re-sweep happened in the PR description.
 
+## Tracking the ACS spec
+
+The testbed also supports the **Agent Control Specification (ACS)**,
+part of Microsoft's
+[Agent Governance Toolkit](https://github.com/microsoft/agent-governance-toolkit).
+The ACS revision the manifest model + validator track is pinned in
+`a2a_testbed.acs.types.ACS_SPEC_VERSION` (currently `0.3.1-beta`) and
+mirrored on the TypeScript side in `playground/src/acsValidator.ts` and
+`acsEvaluator.ts`.
+
+When bumping it:
+
+1. Update `ACS_SPEC_VERSION` in `acs/types.py` **and** both TS files.
+2. Reconcile the manifest model / validator findings / evaluator ops
+   with any spec changes (a new intervention point, op, or field).
+3. Run `pytest tests/test_browser_parity.py` — it fails if the Python
+   and TypeScript registries drift apart, so it will catch a one-sided
+   edit.
+
+ACS is `0.x` and pre-GA; expect more churn here than in the A2A pin.
+
 ## License
 
 By contributing, you agree your work is licensed under Apache 2.0.

@@ -3,14 +3,14 @@
 
 """Transport contract: tasks/resubscribe first event reflects current state.
 
-  Spec:    A2A 1.0 §3.1.6 (SubscribeToTask)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  When a client resubscribes, the agent's first SSE event
-           MUST carry the current Task state — either as a full
-           ``task`` envelope (matching §3.1.2 initial-event shape)
-           or a ``statusUpdate`` reflecting the latest known
-           ``status.state``. Without it the client can't reconcile
-           its cached view with what the agent currently believes.
+Spec:    A2A 1.0 §3.1.6 (SubscribeToTask)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  When a client resubscribes, the agent's first SSE event
+         MUST carry the current Task state — either as a full
+         ``task`` envelope (matching §3.1.2 initial-event shape)
+         or a ``statusUpdate`` reflecting the latest known
+         ``status.state``. Without it the client can't reconcile
+         its cached view with what the agent currently believes.
 """
 
 from __future__ import annotations
@@ -26,9 +26,7 @@ from a2a_testbed.contracts.transport._task_helpers import (
 from a2a_testbed.transport import Transport
 
 
-def make_subscribe_replays_state_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_subscribe_replays_state_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
         card = await fetch_card(transport, agent_url)
         skip = streaming_skip_detail(card)
@@ -58,7 +56,7 @@ def make_subscribe_replays_state_contract(
         status_update = first.get("statusUpdate") if isinstance(first, dict) else None
         if isinstance(status_update, dict):
             assert status_update.get("taskId") == seed["id"], (
-                f"first statusUpdate.taskId ≠ subscribed id"
+                "first statusUpdate.taskId ≠ subscribed id"
             )
             return None
         raise AssertionError(
@@ -68,9 +66,7 @@ def make_subscribe_replays_state_contract(
 
     return Contract(
         id="transport.subscribe_replays_state",
-        description=(
-            "tasks/resubscribe first event reflects the subscribed task's state (§3.1.6)"
-        ),
+        description=("tasks/resubscribe first event reflects the subscribed task's state (§3.1.6)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

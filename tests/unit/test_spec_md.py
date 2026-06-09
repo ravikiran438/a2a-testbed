@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from pydantic import BaseModel, Field
@@ -108,6 +107,7 @@ SHIPPED_MANIFEST_URIS = [
 @pytest.mark.parametrize("uri", SHIPPED_MANIFEST_URIS)
 def test_render_real_manifests(uri):
     import httpx
+
     manifest_url = uri.rstrip("/") + "/manifest.json"
     try:
         resp = httpx.get(manifest_url, timeout=5.0)

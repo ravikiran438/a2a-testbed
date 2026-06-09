@@ -42,14 +42,17 @@ const EXT_URIS = {
 export const agentCards: Record<string, AgentCard> = {
   alice: {
     name: 'Alice (principal)',
-    description:
-      'Principal whose consent decisions delegate to a guardian.',
+    description: 'Principal whose consent decisions delegate to a guardian.',
     url: 'https://example.com/alice',
     version: '1.0.0',
     capabilities: {
       streaming: false,
       extensions: [
-        { uri: EXT_URIS.accessibility, description: 'Sample extension declaration.', required: true },
+        {
+          uri: EXT_URIS.accessibility,
+          description: 'Sample extension declaration.',
+          required: true,
+        },
         { uri: EXT_URIS.consent, description: 'Sample extension declaration.', required: true },
       ],
     },
@@ -64,8 +67,7 @@ export const agentCards: Record<string, AgentCard> = {
   },
   bob: {
     name: 'Bob (guardian)',
-    description:
-      'Guardian agent holding delegated authority over the principal.',
+    description: 'Guardian agent holding delegated authority over the principal.',
     url: 'https://example.com/bob',
     version: '1.0.0',
     capabilities: {
@@ -192,8 +194,7 @@ export const scenario: Scenario = {
       validation: {
         finding: 'declared_ok',
         detail:
-          "Card's declared extension entry matches the schema published " +
-          'at the extension URI.',
+          "Card's declared extension entry matches the schema published " + 'at the extension URI.',
       },
     },
     {
@@ -254,9 +255,7 @@ export const scenario: Scenario = {
       },
       validation: {
         finding: 'declared_ok',
-        detail:
-          'Observed behavior matches the published baseline; no drift ' +
-          'flagged.',
+        detail: 'Observed behavior matches the published baseline; no drift ' + 'flagged.',
       },
     },
   ],

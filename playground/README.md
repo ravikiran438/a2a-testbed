@@ -73,10 +73,14 @@ The dropdown renders new entries automatically.
 ## Run locally
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173/
-npm run build    # static dist/ ready to host on any static-file CDN
+corepack enable  # activates the pinned pnpm (ships with Node)
+pnpm install     # also installs git hooks via the `prepare` script
+pnpm dev         # http://localhost:5173/
+pnpm build       # static dist/ ready to host on any static-file CDN
+pnpm lint        # Biome lint + format check
 ```
+
+Tooling: pnpm + Biome (lint/format) + Lefthook (git hooks at the repo root).
 
 ## Privacy and persistence
 

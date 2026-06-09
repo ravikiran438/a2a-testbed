@@ -1,0 +1,42 @@
+# ACS manifest demonstrating a REAL evidence provider (not a no-op).
+#
+# The `keyword_dlp` evidence provider (a2a_testbed.acs.evidence) runs
+# before the policy and contributes a DLP finding into the canonical
+# input's `annotations`. The policy then denies the handoff when sensitive
+# content is flagged. The scenario runner auto-registers `keyword_dlp`
+# because the manifest references it by id.
+#
+#   a2a-testbed run --acs examples/acs/dlp-evidence.acs.yaml <scenario>
+
+agent_control_specification_version: "0.3.1-beta"
+
+metadata:
+  name: "dlp-evidence"
+  description: "Deny handoffs whose content trips the keyword/DLP classifier."
+
+policies:
+  dlp_policy:
+    type: builtin
+    default_decision: allow
+    rules:
+      - name: deny-on-dlp-flag
+        field: "annotations.dlp.flagged"   # set by the keyword_dlp evidence provider
+        op: equals
+        value: true
+        decision: deny
+        description: "DLP evidence flagged sensitive content in the handoff"
+
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy: dlp_policy
+    evidence:
+      - keyword_dlp
+
+tools:
+  send:
+    type: Tool
+    id: send
+    clearance: internal

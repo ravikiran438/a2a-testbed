@@ -94,7 +94,7 @@ export class ScenarioLoadError extends Error {}
  */
 export function parseScenarioYaml(
   text: string,
-  cardLookup: Record<string, AgentCard> = {}
+  cardLookup: Record<string, AgentCard> = {},
 ): LoadedScenario {
   let raw: unknown;
   try {
@@ -112,9 +112,7 @@ export function parseScenarioYaml(
 
   const agentsRaw = root.agents;
   if (!Array.isArray(agentsRaw) || agentsRaw.length === 0) {
-    throw new ScenarioLoadError(
-      'Scenario must declare at least one agent under `agents:`.'
-    );
+    throw new ScenarioLoadError('Scenario must declare at least one agent under `agents:`.');
   }
 
   const agents: LoadedAgent[] = agentsRaw.map((entry, idx) => {
@@ -185,15 +183,11 @@ export function parseScenarioYaml(
     const declaredKind = typeof s.kind === 'string' ? s.kind : null;
 
     if (declaredKind === 'advance_time') {
-      const seconds = typeof s.advance_seconds === 'number'
-        ? s.advance_seconds
-        : 0;
+      const seconds = typeof s.advance_seconds === 'number' ? s.advance_seconds : 0;
       // Default banner duration: 1.2s, longer than the 0.9s
       // message edge so the visual reads as a deliberate pause.
       const duration_ms =
-        typeof s.duration_ms === 'number' && s.duration_ms > 0
-          ? s.duration_ms
-          : 1200;
+        typeof s.duration_ms === 'number' && s.duration_ms > 0 ? s.duration_ms : 1200;
       steps.push({
         kind: 'advance_time',
         from: '',
@@ -208,13 +202,7 @@ export function parseScenarioYaml(
     const isNonMessageStep = declaredKind !== null || !to || !from;
     if (isNonMessageStep) {
       skippedNonMessageSteps += 1;
-      const tag =
-        declaredKind ??
-        (!from && !to
-          ? 'orphan'
-          : !from
-          ? 'missing from'
-          : 'missing to');
+      const tag = declaredKind ?? (!from && !to ? 'orphan' : !from ? 'missing from' : 'missing to');
       skippedKinds[tag] = (skippedKinds[tag] ?? 0) + 1;
       return;
     }
@@ -229,37 +217,27 @@ export function parseScenarioYaml(
       throw new ScenarioLoadError(`flow[${idx}].action must be a non-empty string.`);
     }
     if (!seenIds.has(from)) {
-      throw new ScenarioLoadError(
-        `flow[${idx}].from references unknown agent '${from}'.`
-      );
+      throw new ScenarioLoadError(`flow[${idx}].from references unknown agent '${from}'.`);
     }
     if (!seenIds.has(to)) {
-      throw new ScenarioLoadError(
-        `flow[${idx}].to references unknown agent '${to}'.`
-      );
+      throw new ScenarioLoadError(`flow[${idx}].to references unknown agent '${to}'.`);
     }
 
     const message = typeof s.message === 'string' ? s.message : undefined;
     const expect =
-      s.expect && typeof s.expect === 'object'
-        ? (s.expect as Record<string, unknown>)
-        : undefined;
+      s.expect && typeof s.expect === 'object' ? (s.expect as Record<string, unknown>) : undefined;
 
     // duration_ms not in CLI YAML; default to 900ms per step so the
     // animation has a consistent rhythm.
     const duration_ms =
-      typeof s.duration_ms === 'number' && s.duration_ms > 0
-        ? s.duration_ms
-        : 900;
+      typeof s.duration_ms === 'number' && s.duration_ms > 0 ? s.duration_ms : 900;
 
     steps.push({ from, to, action, message, expect, duration_ms });
   });
 
   // Count how many agents wanted a card (had a `card:` field) and how
   // many ended up with one resolved.
-  const cardsTotal = agents.filter(
-    (a) => a.card !== null || a.cardHint !== undefined
-  ).length;
+  const cardsTotal = agents.filter((a) => a.card !== null || a.cardHint !== undefined).length;
   const cardsResolved = agents.filter((a) => a.card !== null).length;
 
   return {

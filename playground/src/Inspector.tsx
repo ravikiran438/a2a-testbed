@@ -1,3 +1,4 @@
+import type { Verdict } from './acsEvaluator';
 import type { AgentCard, ScenarioStep } from './scenario';
 
 export type InspectorTarget =
@@ -46,6 +47,8 @@ interface Props {
   step?: ScenarioStep;
   /** Real-execution result for the focused step, if any. */
   stepResult?: StepRunResult;
+  /** ACS runtime-governance verdicts for the focused step, if any. */
+  acsVerdicts?: Verdict[];
   onLoadCardForAgent?: (cardId: string) => void;
 }
 
@@ -55,13 +58,13 @@ export function Inspector({
   agentMeta,
   step,
   stepResult,
+  acsVerdicts,
   onLoadCardForAgent,
 }: Props) {
   if (!target) {
     return (
       <div className="inspector-empty">
-        Click an agent or an edge to inspect its AgentCard or message
-        payload.
+        Click an agent or an edge to inspect its AgentCard or message payload.
       </div>
     );
   }
@@ -76,9 +79,7 @@ export function Inspector({
         </div>
         <div className="inspector-section">
           <div className="inspector-label">Description</div>
-          <div className="inspector-value description">
-            {agentCard.description}
-          </div>
+          <div className="inspector-value description">{agentCard.description}</div>
         </div>
         <div className="inspector-section">
           <div className="inspector-label">Declared extensions</div>
@@ -93,9 +94,7 @@ export function Inspector({
         </div>
         <div className="inspector-section">
           <div className="inspector-label">AgentCard JSON</div>
-          <pre className="inspector-json">
-            {JSON.stringify(agentCard, null, 2)}
-          </pre>
+          <pre className="inspector-json">{JSON.stringify(agentCard, null, 2)}</pre>
         </div>
       </div>
     );
@@ -115,9 +114,7 @@ export function Inspector({
         </div>
         <div className="inspector-section">
           <div className="inspector-label">Role</div>
-          <div className="inspector-value">
-            {agentMeta.role.replace('_', ' ')}
-          </div>
+          <div className="inspector-value">{agentMeta.role.replace('_', ' ')}</div>
         </div>
         {agentMeta.cardHint && (
           <div className="inspector-section">
@@ -130,16 +127,11 @@ export function Inspector({
         <div className="inspector-pending">
           <strong>AgentCard not loaded.</strong>
           <div>
-            The scenario YAML referenced{' '}
-            {filename ? <code>{filename}</code> : 'a card file'}, but the
-            browser can&apos;t follow file paths. Upload the JSON to see
-            the full card here.
+            The scenario YAML referenced {filename ? <code>{filename}</code> : 'a card file'}, but
+            the browser can&apos;t follow file paths. Upload the JSON to see the full card here.
           </div>
           {onLoadCardForAgent && (
-            <button
-              className="btn primary small"
-              onClick={() => onLoadCardForAgent(agentMeta.id)}
-            >
+            <button className="btn primary small" onClick={() => onLoadCardForAgent(agentMeta.id)}>
               {filename ? `Upload ${filename}` : 'Upload card JSON'}
             </button>
           )}
@@ -150,9 +142,7 @@ export function Inspector({
 
   if (target.kind === 'step' && step) {
     const validationClass =
-      step.validation?.finding === 'declared_ok'
-        ? 'finding-ok'
-        : 'finding-fail';
+      step.validation?.finding === 'declared_ok' ? 'finding-ok' : 'finding-fail';
     return (
       <div className="inspector-body">
         <div className="inspector-section">
@@ -174,20 +164,35 @@ export function Inspector({
           </div>
         )}
 
+        {/* ACS runtime-governance verdicts for this step's handoff,
+            when an ACS manifest is applied. One row per evaluated
+            intervention point, colored by decision. */}
+        {acsVerdicts && acsVerdicts.length > 0 && (
+          <div className="inspector-section">
+            <div className="inspector-label">ACS governance</div>
+            <ul className="inspector-checks acs-verdicts">
+              {acsVerdicts.map((v, i) => (
+                <li key={i} className={`acs-${v.decision}`}>
+                  <span className="acs-decision">{v.decision}</span>
+                  <span className="check-name">{v.intervention_point}</span>
+                  <span className="check-detail">
+                    {(v.reasons || []).join('; ')}
+                    {v.failed_closed ? ' (fail-closed)' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* User-authored expectations from the YAML. When the step
             ran against a real external agent we render the live
             check results; otherwise the static "not enforced" note. */}
         {step.expect && stepResult && (
           <div className="inspector-section">
             <div className="inspector-label">Live result</div>
-            <div
-              className={`inspector-finding ${
-                stepResult.ok ? 'finding-ok' : 'finding-fail'
-              }`}
-            >
-              <strong>
-                {stepResult.ok ? '✓ all checks passed' : '✗ failed'}
-              </strong>
+            <div className={`inspector-finding ${stepResult.ok ? 'finding-ok' : 'finding-fail'}`}>
+              <strong>{stepResult.ok ? '✓ all checks passed' : '✗ failed'}</strong>
               <div>
                 HTTP {stepResult.status || '—'}
                 {stepResult.error ? ` · ${stepResult.error}` : ''}
@@ -195,10 +200,7 @@ export function Inspector({
             </div>
             <ul className="inspector-checks">
               {stepResult.checks.map((c, i) => (
-                <li
-                  key={i}
-                  className={c.ok ? 'check-ok' : 'check-fail'}
-                >
+                <li key={i} className={c.ok ? 'check-ok' : 'check-fail'}>
                   <span className="check-mark">{c.ok ? '✓' : '✗'}</span>
                   <span className="check-name">{c.name}</span>
                   <span className="check-detail">{c.detail}</span>
@@ -219,15 +221,11 @@ export function Inspector({
           <div className="inspector-section">
             <div className="inspector-label">Expectations (from YAML)</div>
             <div className="inspector-not-enforced">
-              <strong>Not enforced for this step.</strong> The browser
-              runs real HTTP only for agents declared{' '}
-              <code>runtime: external</code> with a <code>url:</code>.
-              For other steps, run the scenario through the CLI:{' '}
-              <code>a2a-testbed run scenario.yaml</code>
+              <strong>Not enforced for this step.</strong> The browser runs real HTTP only for
+              agents declared <code>runtime: external</code> with a <code>url:</code>. For other
+              steps, run the scenario through the CLI: <code>a2a-testbed run scenario.yaml</code>
             </div>
-            <pre className="inspector-json">
-              {JSON.stringify(step.expect, null, 2)}
-            </pre>
+            <pre className="inspector-json">{JSON.stringify(step.expect, null, 2)}</pre>
           </div>
         )}
 
@@ -246,9 +244,7 @@ export function Inspector({
 
         <div className="inspector-section">
           <div className="inspector-label">Message payload</div>
-          <pre className="inspector-json">
-            {JSON.stringify(step.message, null, 2)}
-          </pre>
+          <pre className="inspector-json">{JSON.stringify(step.message, null, 2)}</pre>
         </div>
       </div>
     );

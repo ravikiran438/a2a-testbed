@@ -1,0 +1,21 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      root: "playground/"
+      glob: "*.{js,jsx,ts,tsx,json,css}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    ruff:
+      glob: "*.py"
+      run: ruff check --fix {staged_files} && ruff format {staged_files}
+      stage_fixed: true
+
+pre-push:
+  parallel: true
+  commands:
+    typecheck:
+      root: "playground/"
+      run: pnpm exec tsc -b
+    pytest:
+      run: pytest -q

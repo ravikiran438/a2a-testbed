@@ -10,7 +10,6 @@ mode (single uvicorn with path-prefix routing).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -38,14 +37,22 @@ def _scenario() -> Scenario:
         ],
         flow=[
             Step.model_validate(
-                {"from": "bob", "to": "alice", "action": "ping",
-                 "message": "ping: please respond",
-                 "expect": {"response_status": "2xx"}}
+                {
+                    "from": "bob",
+                    "to": "alice",
+                    "action": "ping",
+                    "message": "ping: please respond",
+                    "expect": {"response_status": "2xx"},
+                }
             ),
             Step.model_validate(
-                {"from": "alice", "to": "bob", "action": "pong",
-                 "message": "pong: ack",
-                 "expect": {"response_status": "2xx"}}
+                {
+                    "from": "alice",
+                    "to": "bob",
+                    "action": "pong",
+                    "message": "pong: ack",
+                    "expect": {"response_status": "2xx"},
+                }
             ),
         ],
     )
@@ -58,9 +65,7 @@ async def test_realistic_mode_runs_two_agents():
     assert result.scenario_name == "realistic-mode-smoke"
     assert result.mode == NetworkMode.REALISTIC
     assert len(result.steps) == 2
-    assert result.passed, [
-        f"step {s.step_index}: {s.detail}" for s in result.steps if not s.passed
-    ]
+    assert result.passed, [f"step {s.step_index}: {s.detail}" for s in result.steps if not s.passed]
 
 
 @pytest.mark.asyncio

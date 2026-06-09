@@ -2,7 +2,10 @@
 
 .layout {
   display: grid;
-  grid-template-rows: 72px 1fr 36px;
+  /* Header row grows past 72px when the action bar wraps (e.g. with the
+     ACS toggles + Clear + Run all present), so buttons never get pushed
+     off-screen. */
+  grid-template-rows: minmax(72px, auto) 1fr 36px;
   height: 100vh;
   width: 100vw;
   background: #f8fafc;
@@ -28,6 +31,10 @@
   display: flex;
   align-items: center;
   gap: 20px;
+  /* Wrap onto a second line when the controls exceed the width instead
+     of overflowing off-screen. Only triggers when needed. */
+  flex-wrap: wrap;
+  row-gap: 10px;
 }
 /* Push everything from ext-links onward to the right edge of the
    inner container (right edge of body content on wide screens). */
@@ -45,8 +52,12 @@
   padding: 0;
   line-height: 1;
 }
-.brand-button:hover .brand-wordmark { color: #1e40af; }
-.brand-button:hover .brand-grad { opacity: 0.85; }
+.brand-button:hover .brand-wordmark {
+  color: #1e40af;
+}
+.brand-button:hover .brand-grad {
+  opacity: 0.85;
+}
 
 .brand-icon {
   display: block;
@@ -58,7 +69,7 @@
 
 .brand-wordmark {
   display: inline-flex;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -89,7 +100,9 @@
   color: #475569;
   text-decoration: none;
 }
-.ext-links a:hover { color: #0f172a; }
+.ext-links a:hover {
+  color: #0f172a;
+}
 
 .mode-toggle {
   display: flex;
@@ -129,6 +142,12 @@
 .actions {
   display: flex;
   gap: 8px;
+  /* Let the action buttons (picker, Load YAML, Add Observer, Preview ACS,
+     Enforce ACS, Clear, Run) wrap and stay right-aligned rather than
+     pushing the Run button past the edge of the screen. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 .btn {
   padding: 6px 14px;
@@ -162,8 +181,13 @@
 }
 
 @keyframes pulse-bg {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
-  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
 }
 
 /* Canvas + sidebar */
@@ -254,8 +278,15 @@
 }
 
 @keyframes pulse-dot {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
-  50% { transform: scale(1.3); box-shadow: 0 0 0 5px rgba(245, 158, 11, 0); }
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+  }
+  50% {
+    transform: scale(1.3);
+    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);
+  }
 }
 
 /* Inspector */
@@ -427,7 +458,10 @@
   min-width: 160px;
   font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s;
 }
 .agent-node:hover {
   border-color: #94a3b8;
@@ -536,7 +570,10 @@
   font-size: 11.5px;
   color: #92400e;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 .card-pill:hover {
   background: #fde68a;
@@ -580,7 +617,10 @@
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   max-width: 130px;
   line-height: 1.1;
   border: 1px dashed transparent;
@@ -647,8 +687,17 @@
   animation: none;
 }
 @keyframes missing-card-pulse {
-  0%, 100% { box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25), 0 0 0 0 rgba(251, 191, 36, 0.6); }
-  50% { box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25), 0 0 0 8px rgba(251, 191, 36, 0); }
+  0%,
+  100% {
+    box-shadow:
+      0 1px 3px rgba(15, 23, 42, 0.25),
+      0 0 0 0 rgba(251, 191, 36, 0.6);
+  }
+  50% {
+    box-shadow:
+      0 1px 3px rgba(15, 23, 42, 0.25),
+      0 0 0 8px rgba(251, 191, 36, 0);
+  }
 }
 
 /* Make the agent-node a positioning context for the "?" overlay. */
@@ -670,6 +719,55 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* Target toggle: AgentCard (live manifests) vs ACS manifest (local). */
+.validate-target {
+  display: inline-flex;
+  gap: 0;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px;
+  align-self: flex-start;
+}
+.vt-btn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.vt-btn:hover {
+  color: #0f172a;
+}
+.vt-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.validate-blurb {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #475569;
+  margin: 0;
+}
+.validate-blurb code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.finding-ok-text {
+  color: #15803d;
+  font-weight: 700;
+}
+.finding-fail-text {
+  color: #b91c1c;
+  font-weight: 700;
 }
 .validate-controls {
   display: flex;
@@ -809,9 +907,15 @@
   color: #475569;
   text-decoration: none;
 }
-.footer a:hover { color: #0f172a; }
-.footer-mid { text-align: center; }
-.footer-right { text-align: right; }
+.footer a:hover {
+  color: #0f172a;
+}
+.footer-mid {
+  text-align: center;
+}
+.footer-right {
+  text-align: right;
+}
 
 /* Home page */
 
@@ -891,7 +995,9 @@
   border-left: 3px solid #38bdf8;
   border-radius: 4px;
 }
-.hero-sublead strong { color: #075985; }
+.hero-sublead strong {
+  color: #075985;
+}
 .hero-actions {
   display: flex;
   gap: 10px;
@@ -911,7 +1017,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 .tool-card:hover {
   border-color: #cbd5e1;
@@ -961,7 +1069,7 @@
   white-space: nowrap;
 }
 .experimental-badge::before {
-  content: '';
+  content: "";
   position: absolute;
   bottom: -4px;
   left: 12px;
@@ -972,7 +1080,7 @@
   border-top: 4px solid #fde68a;
 }
 .experimental-badge::after {
-  content: '';
+  content: "";
   position: absolute;
   bottom: -3px;
   left: 13px;
@@ -1014,13 +1122,15 @@
   cursor: pointer;
   user-select: none;
 }
-.observer-toggle:hover { background: #e2e8f0; }
+.observer-toggle:hover {
+  background: #e2e8f0;
+}
 .observer-toggle.on {
   background: #ecfeff;
   border-color: #67e8f9;
   color: #155e75;
 }
-.observer-toggle input[type='checkbox'] {
+.observer-toggle input[type="checkbox"] {
   margin: 0;
   cursor: pointer;
 }
@@ -1087,7 +1197,9 @@
   padding: 12px 14px;
   margin: 0;
 }
-.obs-honest strong { color: #292524; }
+.obs-honest strong {
+  color: #292524;
+}
 
 .obs-inspiration {
   margin-top: 18px;
@@ -1111,7 +1223,9 @@
   color: #334155;
   margin: 0 0 10px 0;
 }
-.obs-inspiration p:last-child { margin-bottom: 0; }
+.obs-inspiration p:last-child {
+  margin-bottom: 0;
+}
 .obs-inspiration ul {
   margin: 0 0 12px 0;
   padding-left: 18px;
@@ -1127,7 +1241,10 @@
   text-decoration: none;
   border-bottom: 1px dotted #a5b4fc;
 }
-.obs-inspiration ul a:hover { color: #312e81; border-bottom-color: #312e81; }
+.obs-inspiration ul a:hover {
+  color: #312e81;
+  border-bottom-color: #312e81;
+}
 
 .obs-deep-dive-cta {
   margin-top: 18px;
@@ -1199,7 +1316,10 @@
   border-radius: 4px;
   line-height: 1;
 }
-.modal-close:hover { background: #f1f5f9; color: #0f172a; }
+.modal-close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
 .modal-lead {
   margin: 14px 22px 8px 22px;
   font-size: 12.5px;
@@ -1314,13 +1434,18 @@
   vertical-align: top;
   border-bottom: 1px solid #f1f5f9;
 }
-.pain-table tr:last-child td { border-bottom: 0; }
+.pain-table tr:last-child td {
+  border-bottom: 0;
+}
 .pain-problem {
   width: 38%;
   font-weight: 600;
   color: #0f172a;
 }
-.pain-solution { color: #475569; line-height: 1.55; }
+.pain-solution {
+  color: #475569;
+  line-height: 1.55;
+}
 
 .ref-grid {
   display: grid;
@@ -1342,7 +1467,9 @@
   padding: 16px 18px;
   text-decoration: none;
   color: inherit;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 .ref-card:hover {
   border-color: #93c5fd;
@@ -1384,7 +1511,9 @@
   line-height: 1.65;
   color: #334155;
 }
-.how-list li strong { color: #0f172a; }
+.how-list li strong {
+  color: #0f172a;
+}
 .how-list code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -1412,21 +1541,31 @@
   .ref-grid {
     grid-template-columns: 1fr;
   }
-  .hero h1 { font-size: 28px; }
+  .hero h1 {
+    font-size: 28px;
+  }
 }
 
 /* Make react-flow's animated edges flow more visibly + glow. */
 .react-flow__edge.animated path {
-  animation: dashdraw 0.4s linear infinite,
-             edge-glow 1.6s ease-in-out infinite;
+  animation:
+    dashdraw 0.4s linear infinite,
+    edge-glow 1.6s ease-in-out infinite;
   filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.65));
 }
 @keyframes dashdraw {
-  to { stroke-dashoffset: -10; }
+  to {
+    stroke-dashoffset: -10;
+  }
 }
 @keyframes edge-glow {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.45)); }
-  50%      { filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.85)); }
+  0%,
+  100% {
+    filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.45));
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.85));
+  }
 }
 
 /* Active node "lit from within" via radial gradient. */
@@ -1465,9 +1604,15 @@
   animation: live-dot-pulse 1.6s ease-out infinite;
 }
 @keyframes live-dot-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(34, 197, 94, 0.6); }
-  70%  { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);   }
-  100% { box-shadow: 0 0 0 0   rgba(34, 197, 94, 0);   }
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
 }
 .live-scenario-banner .live-text strong {
   color: #14532d;
@@ -1504,8 +1649,14 @@
   color: #4c1d95;
 }
 @keyframes advance-time-fade-in {
-  from { opacity: 0; transform: translateY(-3px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1717,7 +1868,9 @@
   padding: 4px 6px;
   border-radius: 3px;
 }
-.conformance-row.ok { color: #15803d; }
+.conformance-row.ok {
+  color: #15803d;
+}
 .conformance-row.soft {
   color: #854d0e;
   background: #fefce8;
@@ -1735,9 +1888,15 @@
   font-size: 10.5px;
   color: #64748b;
 }
-.conformance-row.ok .conformance-section { color: #16a34a; }
-.conformance-row.soft .conformance-section { color: #a16207; }
-.conformance-row.fail .conformance-section { color: #dc2626; }
+.conformance-row.ok .conformance-section {
+  color: #16a34a;
+}
+.conformance-row.soft .conformance-section {
+  color: #a16207;
+}
+.conformance-row.fail .conformance-section {
+  color: #dc2626;
+}
 .conformance-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
@@ -1750,8 +1909,12 @@
   font-size: 11px;
   word-break: break-word;
 }
-.conformance-row.soft .conformance-detail { color: #854d0e; }
-.conformance-row.fail .conformance-detail { color: #991b1b; }
+.conformance-row.soft .conformance-detail {
+  color: #854d0e;
+}
+.conformance-row.fail .conformance-detail {
+  color: #991b1b;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Live-result check list (Inspector)                                     */
@@ -1787,8 +1950,12 @@
   font-weight: 700;
   text-align: center;
 }
-.inspector-checks li.check-ok .check-mark { color: #15803d; }
-.inspector-checks li.check-fail .check-mark { color: #b91c1c; }
+.inspector-checks li.check-ok .check-mark {
+  color: #15803d;
+}
+.inspector-checks li.check-fail .check-mark {
+  color: #b91c1c;
+}
 .inspector-checks .check-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;
@@ -1797,4 +1964,211 @@
 .inspector-checks .check-detail {
   color: #475569;
   word-break: break-word;
+}
+
+/* ACS governance verdicts in the inspector. */
+.acs-verdicts li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.acs-decision {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.acs-allow .acs-decision {
+  background: #dcfce7;
+  color: #166534;
+}
+.acs-warn .acs-decision {
+  background: #fef3c7;
+  color: #92400e;
+}
+.acs-deny .acs-decision {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.acs-escalate .acs-decision {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
+/* Enforce-mode banner: shown over the canvas when a blocking ACS
+   verdict halts the flow. */
+.acs-blocked-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  max-width: 90%;
+}
+.acs-blocked-icon {
+  font-size: 15px;
+}
+
+/* ----------------------------------------------------------------------
+   Mobile / small-screen responsiveness.
+
+   The desktop shell is a fixed 72px / 1fr / 36px grid with a 1fr+360px
+   canvas/sidebar split and three-column header & footer. Below 760px we:
+     - let the shell size to content (so the header/footer can wrap),
+     - swap vh -> dvh so the mobile URL bar doesn't clip the footer,
+     - stack the canvas above the inspector (Option A keeps the xyflow
+       graph; xyflow handles touch pan/pinch natively, we just guarantee
+       it real height),
+     - wrap the header nav + external-link groups onto their own rows,
+     - stack + center the footer link groups,
+     - grow every header/footer tap target toward the ~44px guideline.
+   ---------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  .layout {
+    /* dvh excludes the mobile browser chrome so the footer isn't cut
+       off; height stays a sane fallback for browsers without dvh. */
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
+    /* Header and footer size to their (now wrapping) content. */
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* ---- Header ---- */
+  .topbar {
+    min-height: 56px;
+  }
+  .topbar-inner {
+    padding: 8px 14px;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+  .brand-button {
+    flex: 1 1 auto;
+  }
+  .brand-wordmark {
+    font-size: 18px;
+  }
+
+  /* Mode tabs: full-width row, evenly split, finger-sized. */
+  .mode-toggle {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .mode-btn {
+    flex: 1 1 0;
+    text-align: center;
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+
+  /* External links: own row, wrap, no longer pinned to the far right,
+     each link a proper tap target. */
+  .topbar-inner .ext-links {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+    gap: 6px 16px;
+    flex-wrap: wrap;
+    font-size: 13px;
+  }
+  .ext-links a {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 2px;
+  }
+
+  /* Scenario action bar wraps; controls are full-width-friendly. */
+  .actions {
+    order: 5;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .actions .btn,
+  .actions .observer-toggle {
+    min-height: 40px;
+  }
+  .scenario-picker {
+    flex: 1 1 100%;
+    min-height: 40px;
+  }
+
+  /* ---- Workspace: canvas on top, inspector below ---- */
+  .canvas-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 55vh 1fr;
+  }
+  .canvas {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .sidebar {
+    overflow: auto;
+  }
+  /* Enlarge xyflow's zoom controls for touch. */
+  .react-flow__controls {
+    transform: scale(1.3);
+    transform-origin: bottom left;
+  }
+
+  /* ---- Footer: stack + center the three groups ---- */
+  .footer {
+    font-size: 12.5px;
+  }
+  .footer-inner {
+    grid-template-columns: 1fr;
+    text-align: center;
+    gap: 4px;
+    padding: 10px 16px;
+  }
+  .footer-left,
+  .footer-mid,
+  .footer-right {
+    text-align: center;
+  }
+  /* Footer links sit inside running text + " · " separators, so keep
+     them inline-block (not flex) and grow the tap area via padding. */
+  .footer a {
+    display: inline-block;
+    padding: 6px 4px;
+  }
+
+  /* Trim home-page side padding so content isn't crammed. */
+  .home {
+    padding: 0 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-wordmark {
+    font-size: 16px;
+  }
+  .topbar-inner {
+    gap: 6px 10px;
+  }
+  .ext-links {
+    justify-content: space-between;
+  }
+  .mode-btn {
+    font-size: 12.5px;
+    padding: 9px 6px;
+  }
 }

@@ -64,6 +64,7 @@ def _to_json(result: ScenarioResult) -> str:
     # report archive prove "this run was conformance-tested against
     # commit X of the A2A spec on date Y."
     from a2a_testbed.spec_meta import load_spec_meta
+
     meta = load_spec_meta()
     payload["spec"] = {
         "name": meta.name,
@@ -77,6 +78,7 @@ def _to_json(result: ScenarioResult) -> str:
 
 def _to_markdown(result: ScenarioResult) -> str:
     from a2a_testbed.spec_meta import load_spec_meta
+
     meta = load_spec_meta()
     status = "PASS" if result.passed else "FAIL"
     lines = [
@@ -92,6 +94,13 @@ def _to_markdown(result: ScenarioResult) -> str:
             f"{result.contracts_fail_count} failed against "
             f"{meta.name} {meta.version}"
             + (f" (commit `{meta.short_commit}`)" if meta.short_commit else "")
+        )
+    if result.acs_verdicts:
+        blocked_steps = sum(1 for s in result.steps if s.acs_blocked)
+        lines.append(
+            f"**ACS:** {len(result.acs_verdicts)} verdicts, "
+            f"{result.acs_blocked_count} blocking"
+            + (f" · {blocked_steps} step(s) blocked" if blocked_steps else "")
         )
     lines.extend(
         [
@@ -112,14 +121,11 @@ def _to_markdown(result: ScenarioResult) -> str:
         from_to = f"{s.from_ or '—'} → {s.to or '—'}"
         action = f"`{s.action}`" if s.action else "—"
         lines.append(
-            f"| {r.step_index} | {s.kind.value} | {from_to} | {action} | "
-            f"{check} | {detail} |"
+            f"| {r.step_index} | {s.kind.value} | {from_to} | {action} | {check} | {detail} |"
         )
 
     if result.contracts:
-        spec_url = (
-            meta.specification_url if meta.commit else meta.source_repo
-        )
+        spec_url = meta.specification_url if meta.commit else meta.source_repo
         lines.extend(
             [
                 "",
@@ -141,14 +147,52 @@ def _to_markdown(result: ScenarioResult) -> str:
                 f"{c.agent_id or '—'} | {check} | {detail} |"
             )
 
+    acs_verdicts = result.acs_verdicts
+    if acs_verdicts:
+        decision_icon = {
+            "allow": "🟢 allow",
+            "warn": "🟡 warn",
+            "deny": "🔴 deny",
+            "escalate": "🟣 escalate",
+        }
+        lines.extend(
+            [
+                "",
+                "## ACS runtime governance",
+                "",
+                "Per-step verdicts from the applied Agent Control "
+                "Specification (ACS) manifest. See "
+                "[docs/ACS.md](../../docs/ACS.md).",
+                "",
+                "| Step | Intervention point | Decision | Policy | Why |",
+                "|---|---|---|---|---|",
+            ]
+        )
+        for v in acs_verdicts:
+            why = "; ".join(v.get("reasons") or []).replace("|", "\\|") or "—"
+            fc = " (fail-closed)" if v.get("failed_closed") else ""
+            decision = decision_icon.get(v.get("decision", ""), v.get("decision", "—"))
+            lines.append(
+                f"| {v.get('step_index', '—')} | "
+                f"`{v.get('intervention_point', '—')}` | {decision}{fc} | "
+                f"{v.get('policy_id') or '—'} | {why} |"
+            )
+
     return "\n".join(lines) + "\n"
 
 
 def _to_badge(result: ScenarioResult) -> str:
-    if result.passed:
+    total = result.pass_count + result.fail_count
+    acs_blocking = result.acs_blocked_count
+    if result.passed and acs_blocking == 0:
         label = f"{result.pass_count}/{result.pass_count} ✓"
         color = "#4c1"
+    elif result.passed and acs_blocking > 0:
+        # Steps passed but ACS flagged blocking verdicts (record mode):
+        # amber so a reviewer notices the governance signal.
+        label = f"{result.pass_count}/{result.pass_count} ⚠ ACS"
+        color = "#dfb317"
     else:
-        label = f"{result.pass_count}/{result.pass_count + result.fail_count} ✗"
+        label = f"{result.pass_count}/{total} ✗"
         color = "#e05d44"
     return _BADGE_TEMPLATE.format(label=label, color=color)

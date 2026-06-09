@@ -1,40 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow,
   Background,
   Controls,
-  MarkerType,
-  Position,
   type Edge,
+  MarkerType,
   type Node,
+  Position,
+  ReactFlow,
 } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
-import { agentCards, scenario, type ScenarioStep, type AgentCard } from './scenario';
 import { AgentNode } from './AgentNode';
-import { Inspector, type InspectorTarget, type StepRunResult } from './Inspector';
-import { ValidatePanel } from './ValidatePanel';
-import { HomePage } from './HomePage';
+import {
+  AcsEvaluator,
+  type AcsManifestObj,
+  POST_POINTS,
+  PRE_POINTS,
+  snapshotFor,
+  stepRequestPayload,
+  type Verdict,
+} from './acsEvaluator';
+import { BUILTIN_SCENARIOS, type BuiltinScenarioDef, findBuiltin } from './builtins';
 import { CloudflareAnalytics } from './CloudflareAnalytics';
 import { CustomScenarioPanel } from './CustomScenarioPanel';
-import {
-  adaptSteps,
-  layoutAgents,
-  parseScenarioYaml,
-  type LoadedScenario,
-} from './scenarioLoader';
-import {
-  BUILTIN_SCENARIOS,
-  findBuiltin,
-  type BuiltinScenarioDef,
-} from './builtins';
 import { ALL_CONTRACTS } from './conformance/contracts';
-import {
-  CHUNK_SIZE,
-  runConformanceChunk,
-  summarize,
-} from './conformance/runner';
+import { CHUNK_SIZE, runConformanceChunk, summarize } from './conformance/runner';
 import type { ContractResult } from './conformance/types';
+import { HomePage } from './HomePage';
+import { Inspector, type InspectorTarget, type StepRunResult } from './Inspector';
+import { type AgentCard, agentCards, type ScenarioStep, scenario } from './scenario';
+import { adaptSteps, type LoadedScenario, layoutAgents, parseScenarioYaml } from './scenarioLoader';
+import { ValidatePanel, type ValidateTarget } from './ValidatePanel';
 import './App.css';
 
 export type Mode = 'home' | 'scenario' | 'validate';
@@ -110,8 +106,8 @@ function deriveRuntimeKind(agents: ActiveAgent[]): {
     new Set(
       agents
         .filter((a) => a.runtime === 'external' && typeof a.url === 'string')
-        .map((a) => a.url as string)
-    )
+        .map((a) => a.url as string),
+    ),
   );
   return {
     runtimeKind: urls.length > 0 ? 'external' : 'simulated',
@@ -133,10 +129,10 @@ const BUNDLED_AGENT_META: Array<{
   role: string;
   position: { x: number; y: number };
 }> = [
-  { id: 'alice', label: 'Alice', role: 'principal',         position: { x:  60, y: 220 } },
-  { id: 'bob',   label: 'Bob',   role: 'guardian',          position: { x: 380, y:  60 } },
-  { id: 'carol', label: 'Carol', role: 'service_provider',  position: { x: 720, y: 220 } },
-  { id: 'observer', label: 'Observer', role: 'integrity',   position: { x: 380, y: 420 } },
+  { id: 'alice', label: 'Alice', role: 'principal', position: { x: 60, y: 220 } },
+  { id: 'bob', label: 'Bob', role: 'guardian', position: { x: 380, y: 60 } },
+  { id: 'carol', label: 'Carol', role: 'service_provider', position: { x: 720, y: 220 } },
+  { id: 'observer', label: 'Observer', role: 'integrity', position: { x: 380, y: 420 } },
 ];
 
 function buildBundledActive(): ActiveScenario {
@@ -256,6 +252,9 @@ interface ExternalStepOutcome {
   bodySnippet: string;
   /** One entry per expect-block check. */
   checks: StepRunResult['checks'];
+  /** Parsed JSON response body (for ACS post-dispatch evaluation against
+   *  the REAL agent response), or null when absent/unparseable. */
+  body?: Record<string, unknown> | null;
   /** Error string when the fetch itself failed (network/CORS/etc). */
   error?: string;
 }
@@ -279,12 +278,11 @@ async function executeExternalStep(
   // under message.content. Fall back to the action label if the
   // scenario didn't supply text (won't happen for the math demo).
   const userText =
-    typeof (step.message as { content?: unknown } | undefined)?.content ===
-    'string'
-      ? ((step.message as { content: string }).content)
+    typeof (step.message as { content?: unknown } | undefined)?.content === 'string'
+      ? (step.message as { content: string }).content
       : step.action;
 
-  const endpoint = agentUrl.replace(/\/$/, '') + '/a2a/v1/';
+  const endpoint = `${agentUrl.replace(/\/$/, '')}/a2a/v1/`;
   const requestBody = {
     jsonrpc: '2.0',
     id: jsonRpcId,
@@ -360,23 +358,32 @@ async function executeExternalStep(
     });
   }
 
+  // Parse the body so ACS can evaluate response-side checkpoints against
+  // the REAL agent response, not a synthetic placeholder.
+  let parsedBody: Record<string, unknown> | null = null;
+  try {
+    const j = JSON.parse(bodyText);
+    parsedBody = j && typeof j === 'object' ? (j as Record<string, unknown>) : { result: j };
+  } catch {
+    parsedBody = null;
+  }
+
   const allOk = checks.every((c) => c.ok);
   return {
     ok: allOk,
     status: res.status,
     bodySnippet: bodyText.slice(0, 400),
     checks,
+    body: parsedBody,
   };
 }
 
 function makeNodesFor(
   active: ActiveScenario,
   includeObserver: boolean,
-  onLoadCard: (cardId: string) => void
+  onLoadCard: (cardId: string) => void,
 ): Node[] {
-  const visible = active.agents.filter(
-    (a) => includeObserver || a.role !== 'observer'
-  );
+  const visible = active.agents.filter((a) => includeObserver || a.role !== 'observer');
   return visible.map((a) => ({
     id: a.id,
     type: 'agent',
@@ -441,7 +448,7 @@ function makeEdgesFor(active: ActiveScenario, includeObserver: boolean): Edge[] 
 
   const observers = active.agents.filter((a) => a.role === 'observer');
   const passiveObservers = observers.filter(
-    (o) => !active.steps.some((s) => s.from === o.id || s.to === o.id)
+    (o) => !active.steps.some((s) => s.from === o.id || s.to === o.id),
   );
   if (passiveObservers.length === 0) return messageEdges;
 
@@ -521,13 +528,119 @@ function isObserverStep(step: ScenarioStep): boolean {
   return step.from === 'observer' || step.to === 'observer';
 }
 
+// Demo ACS governance manifest applied in the scenario view when ACS is
+// toggled on. Mirrors examples/acs/three-party-governance.acs.yaml: deny
+// handoffs to an externally-labelled agent, warn on regulated content.
+// Tools are keyed by agent id, so it lights up the three-party scenario;
+// on other scenarios (no matching tools) it cleanly yields allow/warn.
+const DEMO_ACS_MANIFEST: AcsManifestObj = {
+  agent_control_specification_version: '0.3.1-beta',
+  policies: {
+    handoff_policy: {
+      type: 'builtin',
+      default_decision: 'allow',
+      rules: [
+        {
+          name: 'deny-external-receiver',
+          field: 'tool.security_labels',
+          op: 'contains',
+          value: 'external',
+          decision: 'deny',
+          description: "handoff target carries an 'external' security label",
+        },
+        {
+          name: 'warn-regulated-content',
+          field: 'policy_target.value.message.parts.0.text',
+          op: 'contains',
+          value: 'groceries',
+          decision: 'warn',
+          description: 'message references regulated delivery content',
+        },
+      ],
+    },
+    // Output policy runs AFTER dispatch against the real response, so for
+    // a live (runtime: external) agent this verdict is computed from the
+    // actual bytes the agent returned — not a synthetic placeholder.
+    output_policy: {
+      type: 'builtin',
+      default_decision: 'allow',
+      rules: [
+        {
+          name: 'warn-error-response',
+          field: 'snapshot.response.error',
+          op: 'exists',
+          decision: 'warn',
+          description: 'agent returned a JSON-RPC error',
+        },
+      ],
+    },
+  },
+  intervention_points: {
+    pre_tool_call: {
+      policy: 'handoff_policy',
+      policy_target: '$.tool_call.args',
+      policy_target_kind: 'tool_args',
+      tool_name_from: '$.tool_call.name',
+    },
+    output: {
+      policy: 'output_policy',
+      policy_target: '$.output',
+      policy_target_kind: 'output',
+    },
+  },
+  tools: {
+    alice: { id: 'alice', clearance: 'internal', security_labels: ['internal'] },
+    bob: { id: 'bob', clearance: 'internal', security_labels: ['internal'] },
+    carol: { id: 'carol', clearance: 'external', security_labels: ['external'] },
+  },
+};
+
+// Severity order for picking the edge color when a step produced
+// multiple verdicts. Higher = more severe.
+const ACS_SEVERITY: Record<Verdict['decision'], number> = {
+  allow: 0,
+  warn: 1,
+  deny: 2,
+  escalate: 3,
+};
+const ACS_EDGE_COLOR: Record<Verdict['decision'], string> = {
+  allow: '#16a34a',
+  warn: '#d97706',
+  deny: '#dc2626',
+  escalate: '#9333ea',
+};
+
+function worstVerdict(verdicts: Verdict[] | undefined): Verdict | undefined {
+  if (!verdicts || verdicts.length === 0) return undefined;
+  return verdicts.reduce((worst, v) =>
+    ACS_SEVERITY[v.decision] > ACS_SEVERITY[worst.decision] ? v : worst,
+  );
+}
+
+/** Extract the message text a step would send on the wire. */
+function stepMessageText(step: ScenarioStep): string {
+  const content = (step.message as { content?: unknown } | undefined)?.content;
+  return typeof content === 'string' ? content : (step.action ?? '');
+}
+
 export default function App() {
   const [mode, setMode] = useState<Mode>('home');
+  // Which artifact the Validator tab opens to (AgentCard vs ACS manifest).
+  // Lets the home page deep-link straight to the ACS validator.
+  const [validateTarget, setValidateTarget] = useState<ValidateTarget>('agentcard');
   const [includeObserver, setIncludeObserver] = useState(false);
+  // ACS runtime-governance overlay: when on, the scenario run evaluates
+  // each handoff against the demo ACS manifest and records verdicts.
+  const [acsEnabled, setAcsEnabled] = useState(false);
+  // Enforce mode: a blocking verdict halts the flow. Off = record only.
+  const [acsEnforce, setAcsEnforce] = useState(false);
+  const [acsVerdicts, setAcsVerdicts] = useState<Map<number, Verdict[]>>(new Map());
+  // Step index where enforce mode halted the flow, or null.
+  const [acsBlockedAt, setAcsBlockedAt] = useState<number | null>(null);
   // Initialize from localStorage if a custom scenario was saved last
   // session, otherwise the bundled demo.
   const [activeScenario, setActiveScenario] = useState<ActiveScenario>(
-    () => loadSavedActive() ?? buildBundledActive()
+    () => loadSavedActive() ?? buildBundledActive(),
   );
   // Mirror activeScenario into a ref so stable callbacks (e.g.
   // onLoadCardForAgent) can read the latest value without depending
@@ -542,10 +655,10 @@ export default function App() {
   // rebuild useEffect immediately re-derives these on first render
   // anyway; this just avoids a flash of empty canvas.
   const [nodes, setNodes] = useState<Node[]>(() =>
-    makeNodesFor(loadSavedActive() ?? buildBundledActive(), false, () => {})
+    makeNodesFor(loadSavedActive() ?? buildBundledActive(), false, () => {}),
   );
   const [edges, setEdges] = useState<Edge[]>(() =>
-    makeEdgesFor(loadSavedActive() ?? buildBundledActive(), false)
+    makeEdgesFor(loadSavedActive() ?? buildBundledActive(), false),
   );
 
   // Whether observer-role agents/steps are visible.
@@ -564,16 +677,14 @@ export default function App() {
   // steps whose target agent has `runtime: external` + `url:`.
   // Animation-only steps stay absent from this map and are colored
   // by `step.outcome` as before.
-  const [stepResults, setStepResults] = useState<Map<number, StepRunResult>>(
-    () => new Map()
-  );
+  const [stepResults, setStepResults] = useState<Map<number, StepRunResult>>(() => new Map());
   // Browser-side A2A 1.0 conformance results, keyed by external
   // agent URL. Populated after `runScenario` finishes for any
   // scenario that includes a `runtime: external` agent. Same
   // contract suite the CLI's `conformance` command runs.
-  const [conformanceResults, setConformanceResults] = useState<
-    Map<string, ContractResult[]>
-  >(() => new Map());
+  const [conformanceResults, setConformanceResults] = useState<Map<string, ContractResult[]>>(
+    () => new Map(),
+  );
   const [conformanceRunning, setConformanceRunning] = useState(false);
   // Banner shown while an advance_time step is active. Carries the
   // virtual-clock delta in seconds so the UI can format it as
@@ -585,9 +696,9 @@ export default function App() {
   // Per-URL index of the next contract to run. Drives the chunked
   // "Run next batch" flow — sweeping all 58 in one burst can trip
   // an external agent's per-IP rate limit, so the user paces it.
-  const [conformanceProgress, setConformanceProgress] = useState<
-    Map<string, number>
-  >(() => new Map());
+  const [conformanceProgress, setConformanceProgress] = useState<Map<string, number>>(
+    () => new Map(),
+  );
   // Accordion: panel starts expanded so users see the body's intent
   // copy ("Click Run scenario to drive…") without an extra click.
   // Toggling collapses to a one-line header so the sidebar reclaims
@@ -626,7 +737,7 @@ export default function App() {
       } catch (err) {
         window.alert(
           `Could not load "${file.name}":\n${(err as Error).message}\n\n` +
-            'The file must be valid JSON.'
+            'The file must be valid JSON.',
         );
         return;
       }
@@ -640,7 +751,7 @@ export default function App() {
         window.alert(
           `"${file.name}" doesn't look like an A2A AgentCard.\n\n` +
             'Expected a JSON object with at least a "name" string field. ' +
-            'Make sure you picked the right file.'
+            'Make sure you picked the right file.',
         );
         return;
       }
@@ -655,7 +766,7 @@ export default function App() {
             `The scenario YAML expected:  ${expectedName}\n` +
             `You picked:  ${file.name}\n\n` +
             `If you renamed the file, click OK to use it anyway. ` +
-            `Otherwise click Cancel and pick the matching file.`
+            `Otherwise click Cancel and pick the matching file.`,
         );
         if (!ok) return;
       }
@@ -663,7 +774,7 @@ export default function App() {
       setActiveScenario((prev) => ({
         ...prev,
         agents: prev.agents.map((a) =>
-          a.id === cardId ? { ...a, card: parsed, cardHint: a.cardHint } : a
+          a.id === cardId ? { ...a, card: parsed, cardHint: a.cardHint } : a,
         ),
         agentCardLookup: { ...prev.agentCardLookup, [cardId]: parsed },
       }));
@@ -674,12 +785,7 @@ export default function App() {
   // Document title reflects the active mode so browser tabs / history
   // entries are scannable instead of all reading "a2a-testbed".
   useEffect(() => {
-    const suffix =
-      mode === 'home'
-        ? 'Home'
-        : mode === 'scenario'
-        ? 'Scenario'
-        : 'Validator';
+    const suffix = mode === 'home' ? 'Home' : mode === 'scenario' ? 'Scenario' : 'Validator';
     document.title = `a2a-testbed | ${suffix}`;
   }, [mode]);
 
@@ -696,6 +802,10 @@ export default function App() {
     setTarget(null);
     setStepResults(new Map());
     setConformanceResults(new Map());
+    // Clear ACS run-state too, so a prior run's verdicts and the red
+    // "flow halted by ACS" banner don't linger onto the new scenario.
+    setAcsVerdicts(new Map());
+    setAcsBlockedAt(null);
   }, [showObserver, activeScenario, onLoadCardForAgent]);
 
   // Persist the active scenario to localStorage whenever it changes
@@ -713,7 +823,7 @@ export default function App() {
             agents: activeScenario.agents,
             steps: activeScenario.steps,
             agentCardLookup: activeScenario.agentCardLookup,
-          })
+          }),
         );
       } else {
         localStorage.removeItem(SAVED_ACTIVE_KEY);
@@ -734,12 +844,9 @@ export default function App() {
         // recording this step right now" without changing the
         // underlying message-edge animation.
         if (data.isTap) {
-          const firingStep =
-            activeStep !== null ? activeScenario.steps[activeStep] : null;
+          const firingStep = activeStep !== null ? activeScenario.steps[activeStep] : null;
           const isFiringSource =
-            !!firingStep &&
-            (firingStep.from === edge.source ||
-              firingStep.to === edge.source);
+            !!firingStep && (firingStep.from === edge.source || firingStep.to === edge.source);
           return {
             ...edge,
             animated: isFiringSource,
@@ -763,32 +870,41 @@ export default function App() {
         const status: EdgeStatus = isActive
           ? 'firing'
           : isDone
-          ? runOutcome
-            ? runOutcome.ok
-              ? 'ok'
-              : 'fail'
-            : activeScenario.steps[idx]?.outcome === 'fail'
-            ? 'fail'
-            : 'ok'
-          : 'pending';
+            ? runOutcome
+              ? runOutcome.ok
+                ? 'ok'
+                : 'fail'
+              : activeScenario.steps[idx]?.outcome === 'fail'
+                ? 'fail'
+                : 'ok'
+            : 'pending';
+
+        // ACS overlay: once a step is done and ACS is on, color the
+        // edge by the worst verdict (deny=red, escalate=purple,
+        // warn=amber, allow=green) so governance is visible on the
+        // canvas, not just in the inspector. The firing beat keeps its
+        // own animation color.
+        const acsWorst =
+          acsEnabled && status !== 'firing' ? worstVerdict(acsVerdicts.get(idx)) : undefined;
+        const stroke = acsWorst ? ACS_EDGE_COLOR[acsWorst.decision] : colorByStatus[status];
 
         return {
           ...edge,
           animated: status === 'firing',
           style: {
-            stroke: colorByStatus[status],
+            stroke,
             strokeWidth: status === 'firing' ? 3 : 2,
             strokeDasharray: status === 'firing' ? '6 4' : undefined,
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: colorByStatus[status],
+            color: stroke,
           },
           data: { stepIndex: idx, stepStatus: status },
         };
-      })
+      }),
     );
-  }, [activeStep, completed, activeScenario, stepResults]);
+  }, [activeStep, completed, activeScenario, stepResults, acsEnabled, acsVerdicts]);
 
   // Highlight nodes participating in the active step.
   useEffect(() => {
@@ -807,7 +923,7 @@ export default function App() {
         }
         if (state === 'idle' && completed.size > 0) state = 'done';
         return { ...node, data: { ...node.data, state } };
-      })
+      }),
     );
   }, [activeStep, completed.size, activeScenario]);
 
@@ -815,12 +931,24 @@ export default function App() {
     setPhase('running');
     setCompleted(new Set());
     setStepResults(new Map());
+    setAcsVerdicts(new Map());
+    setAcsBlockedAt(null);
     setTarget(null);
 
     // Build a quick lookup so each step can find its target's
     // runtime/url without scanning the agent list every iteration.
     const agentById = new Map<string, ActiveAgent>();
     for (const a of activeScenario.agents) agentById.set(a.id, a);
+
+    // ACS overlay: a fail-closed evaluator for the demo manifest.
+    // Register no-op evidence providers for any declared evidence ids
+    // so the policy logic is what's exercised (the demo declares none).
+    const acsEval = new AcsEvaluator({ failClosed: true });
+    for (const d of Object.values(DEMO_ACS_MANIFEST.intervention_points ?? {})) {
+      for (const evId of d.evidence ?? []) {
+        acsEval.registerEvidence(evId, () => ({}));
+      }
+    }
 
     for (let i = 0; i < activeScenario.steps.length; i++) {
       const step = activeScenario.steps[i];
@@ -848,9 +976,44 @@ export default function App() {
         continue;
       }
 
+      // The A2A request this step would put on the wire, reused for both
+      // pre- and post-dispatch ACS evaluation.
+      const acsReqPayload =
+        acsEnabled && step.to ? stepRequestPayload(stepMessageText(step)) : null;
+
+      // ACS PRE-dispatch checkpoints (input / pre_tool_call). In enforce
+      // mode a blocking verdict (deny / escalate) stops the handoff here
+      // and halts the flow — mirroring the Python runner.
+      if (acsReqPayload && step.to) {
+        const preExch = {
+          receiver_id: step.to,
+          request_body: acsReqPayload,
+          response_body: {},
+        };
+        const preVerdicts: Verdict[] = [];
+        for (const point of PRE_POINTS) {
+          if (!DEMO_ACS_MANIFEST.intervention_points?.[point]) continue;
+          preVerdicts.push(acsEval.evaluate(DEMO_ACS_MANIFEST, point, snapshotFor(point, preExch)));
+        }
+        if (preVerdicts.length > 0) {
+          setAcsVerdicts((prev) => new Map(prev).set(i, preVerdicts));
+        }
+        const worst = worstVerdict(preVerdicts);
+        if (acsEnforce && worst && (worst.decision === 'deny' || worst.decision === 'escalate')) {
+          // Blocked: never dispatch. Mark the step done (its edge shows
+          // the deny color) and stop the remaining flow.
+          setAcsBlockedAt(i);
+          await new Promise((r) => setTimeout(r, Math.max(step.duration_ms, 300)));
+          setCompleted((s) => new Set(s).add(i));
+          break;
+        }
+      }
+
       const target = agentById.get(step.to);
-      const isExternal =
-        target?.runtime === 'external' && typeof target.url === 'string';
+      const isExternal = target?.runtime === 'external' && typeof target.url === 'string';
+      // The real response body, captured from a live agent so ACS can
+      // evaluate response-side checkpoints against the actual bytes.
+      let acsRealBody: Record<string, unknown> | null = null;
 
       if (isExternal && target?.url) {
         // Real HTTP path. Run the request + minimum-duration timer
@@ -860,6 +1023,7 @@ export default function App() {
           executeExternalStep(target.url, step, i + 1),
           new Promise<void>((r) => setTimeout(r, Math.max(step.duration_ms, 350))),
         ]);
+        acsRealBody = outcome.body ?? null;
         setStepResults((prev) => {
           const next = new Map(prev);
           next.set(i, {
@@ -877,6 +1041,31 @@ export default function App() {
         await new Promise((r) => setTimeout(r, step.duration_ms));
       }
 
+      // ACS POST-dispatch checkpoints (post_tool_call / output), evaluated
+      // against the REAL response body for live agents (synthetic empty
+      // for in-canvas scripted steps, which have no real response).
+      if (acsReqPayload && step.to) {
+        const postExch = {
+          receiver_id: step.to,
+          request_body: acsReqPayload,
+          response_body: acsRealBody ?? { result: {} },
+        };
+        const postVerdicts: Verdict[] = [];
+        for (const point of POST_POINTS) {
+          if (!DEMO_ACS_MANIFEST.intervention_points?.[point]) continue;
+          postVerdicts.push(
+            acsEval.evaluate(DEMO_ACS_MANIFEST, point, snapshotFor(point, postExch)),
+          );
+        }
+        if (postVerdicts.length > 0) {
+          setAcsVerdicts((prev) => {
+            const next = new Map(prev);
+            next.set(i, [...(next.get(i) ?? []), ...postVerdicts]);
+            return next;
+          });
+        }
+      }
+
       setCompleted((s) => {
         const next = new Set(s);
         next.add(i);
@@ -888,7 +1077,7 @@ export default function App() {
     // Conformance is now user-triggered (chunked, one batch at a
     // time) instead of auto-running here — bursting all 58 contracts
     // back-to-back can trip an external agent's per-IP rate limit.
-  }, [showObserver, activeScenario]);
+  }, [showObserver, activeScenario, acsEnabled, acsEnforce]);
 
   /**
    * Run the next chunk of conformance contracts against every
@@ -913,7 +1102,7 @@ export default function App() {
       setConformanceResults((prev) => {
         const next = new Map(prev);
         for (const { url, startIndex, chunk } of updates) {
-          const existing = startIndex === 0 ? [] : next.get(url) ?? [];
+          const existing = startIndex === 0 ? [] : (next.get(url) ?? []);
           next.set(url, [...existing, ...chunk]);
         }
         return next;
@@ -940,6 +1129,8 @@ export default function App() {
     setPhase('idle');
     setActiveStep(null);
     setCompleted(new Set());
+    setAcsVerdicts(new Map());
+    setAcsBlockedAt(null);
     setTarget(null);
   }, []);
 
@@ -964,27 +1155,19 @@ export default function App() {
         .map(({ s, i }, displayIdx) => {
           const text =
             s.kind === 'advance_time'
-              ? `${displayIdx + 1}. virtual time +${formatVirtualTimeDelta(
-                  s.advance_seconds ?? 0,
-                )}`
+              ? `${displayIdx + 1}. virtual time +${formatVirtualTimeDelta(s.advance_seconds ?? 0)}`
               : `${displayIdx + 1}. ${s.from} → ${s.to}: ${s.action}`;
           return {
             index: i,
             text,
-            status: completed.has(i)
-              ? 'done'
-              : i === activeStep
-              ? 'firing'
-              : 'pending',
+            status: completed.has(i) ? 'done' : i === activeStep ? 'firing' : 'pending',
           };
         }),
-    [activeStep, completed, showObserver, activeScenario]
+    [activeStep, completed, showObserver, activeScenario],
   );
 
   const inspectorAgent =
-    target?.kind === 'agent'
-      ? activeScenario.agentCardLookup[target.cardId]
-      : undefined;
+    target?.kind === 'agent' ? activeScenario.agentCardLookup[target.cardId] : undefined;
   const inspectorAgentMeta =
     target?.kind === 'agent'
       ? (() => {
@@ -1025,7 +1208,7 @@ export default function App() {
   // ability to switch back to a built-in.
   const dropdownValue: string = activeScenario.isCustom
     ? CUSTOM_ID
-    : activeScenario.builtinId ?? BUNDLED_DEFAULT_ID;
+    : (activeScenario.builtinId ?? BUNDLED_DEFAULT_ID);
 
   return (
     <div className="layout">
@@ -1037,156 +1220,177 @@ export default function App() {
       />
       <header className="topbar">
         <div className="topbar-inner">
-        <button
-          className="brand-button"
-          onClick={() => setMode('home')}
-          aria-label="a2a-testbed home"
-        >
-          <img
-            className="brand-icon"
-            src="/a2a-logo/a2a-testbed-icon.svg"
-            alt=""
-            width="40"
-            height="40"
-          />
-          <span className="brand-wordmark">
-            <span>a</span>
-            <span className="brand-grad">2</span>
-            <span>a</span>
-            <span className="brand-sep">-</span>
-            <span>testbed</span>
-          </span>
-        </button>
-        <nav className="mode-toggle">
           <button
-            className={`mode-btn ${mode === 'home' ? 'active' : ''}`}
+            className="brand-button"
             onClick={() => setMode('home')}
+            aria-label="a2a-testbed home"
           >
-            Home
+            <img
+              className="brand-icon"
+              src="/a2a-logo/a2a-testbed-icon.svg"
+              alt=""
+              width="40"
+              height="40"
+            />
+            <span className="brand-wordmark">
+              <span>a</span>
+              <span className="brand-grad">2</span>
+              <span>a</span>
+              <span className="brand-sep">-</span>
+              <span>testbed</span>
+            </span>
           </button>
-          <button
-            className={`mode-btn ${mode === 'scenario' ? 'active' : ''}`}
-            onClick={() => setMode('scenario')}
-          >
-            Scenario
-          </button>
-          <button
-            className={`mode-btn ${mode === 'validate' ? 'active' : ''}`}
-            onClick={() => setMode('validate')}
-          >
-            Validator
-          </button>
-        </nav>
-        <nav className="ext-links">
-          <a href="https://a2a-protocol.org/" target="_blank" rel="noreferrer">
-            A2A Spec ↗
-          </a>
-          <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer">
-            MCP ↗
-          </a>
-          <a
-            href="https://github.com/ravikiran438/a2a-testbed"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub ↗
-          </a>
-        </nav>
-        {mode === 'scenario' && (
-          <div className="actions">
-            <select
-              className="scenario-picker"
-              value={dropdownValue}
-              onChange={(e) => onSelectBuiltin(e.target.value)}
-              disabled={phase === 'running'}
-              title="Pick a built-in scenario, or load your own YAML."
+          <nav className="mode-toggle">
+            <button
+              className={`mode-btn ${mode === 'home' ? 'active' : ''}`}
+              onClick={() => setMode('home')}
             >
-              <option value={BUNDLED_DEFAULT_ID}>
-                Three-party guardian consent (visualization)
-              </option>
-              {BUILTIN_SCENARIOS.map((def) => (
-                <option key={def.id} value={def.id}>
-                  {def.label}
-                  {def.runtimeKind === 'external' ? ' — live HTTP' : ''}
+              Home
+            </button>
+            <button
+              className={`mode-btn ${mode === 'scenario' ? 'active' : ''}`}
+              onClick={() => setMode('scenario')}
+            >
+              Scenario
+            </button>
+            <button
+              className={`mode-btn ${mode === 'validate' ? 'active' : ''}`}
+              onClick={() => setMode('validate')}
+            >
+              Validator
+            </button>
+          </nav>
+          <nav className="ext-links">
+            <a href="https://a2a-protocol.org/" target="_blank" rel="noreferrer">
+              A2A Spec ↗
+            </a>
+            <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer">
+              MCP ↗
+            </a>
+            <a href="https://github.com/ravikiran438/a2a-testbed" target="_blank" rel="noreferrer">
+              GitHub ↗
+            </a>
+          </nav>
+          {mode === 'scenario' && (
+            <div className="actions">
+              <select
+                className="scenario-picker"
+                value={dropdownValue}
+                onChange={(e) => onSelectBuiltin(e.target.value)}
+                disabled={phase === 'running'}
+                title="Pick a built-in scenario, or load your own YAML."
+              >
+                <option value={BUNDLED_DEFAULT_ID}>
+                  Three-party guardian consent (visualization)
                 </option>
-              ))}
-              {/* The "Custom upload" entry is shown only when one is
+                {BUILTIN_SCENARIOS.map((def) => (
+                  <option key={def.id} value={def.id}>
+                    {def.label}
+                    {def.runtimeKind === 'external' ? ' — live HTTP' : ''}
+                  </option>
+                ))}
+                {/* The "Custom upload" entry is shown only when one is
                   active; selecting it is a no-op (the user uploads
                   via "Load YAML"). It exists to reflect state, not
                   to be re-selected. */}
-              {activeScenario.isCustom && (
-                <option value={CUSTOM_ID} disabled>
-                  Custom upload (active)
-                </option>
-              )}
-            </select>
-            <button
-              className="btn"
-              onClick={() => setPanelOpen(true)}
-              disabled={phase === 'running'}
-              title="Paste or upload a CLI-format YAML scenario."
-            >
-              Load YAML
-            </button>
-            {activeScenario.isCustom && (
+                {activeScenario.isCustom && (
+                  <option value={CUSTOM_ID} disabled>
+                    Custom upload (active)
+                  </option>
+                )}
+              </select>
               <button
                 className="btn"
-                onClick={onResetToDefault}
+                onClick={() => setPanelOpen(true)}
                 disabled={phase === 'running'}
-                title="Discard the loaded custom scenario and uploaded cards; return to the bundled three-party demo."
+                title="Paste or upload a CLI-format YAML scenario."
               >
-                Discard custom
+                Load YAML
               </button>
-            )}
-            {/* Observer toggle is bundled-scenario-only. Custom
+              {activeScenario.isCustom && (
+                <button
+                  className="btn"
+                  onClick={onResetToDefault}
+                  disabled={phase === 'running'}
+                  title="Discard the loaded custom scenario and uploaded cards; return to the bundled three-party demo."
+                >
+                  Discard custom
+                </button>
+              )}
+              {/* Observer toggle is bundled-scenario-only. Custom
                 scenarios always render observers — the user
                 explicitly authored them in YAML. */}
-            {!activeScenario.isCustom && (
+              {!activeScenario.isCustom && (
+                <label
+                  className={`observer-toggle ${includeObserver ? 'on' : ''}`}
+                  title="Adds a passive observer agent that taps every wire exchange. Useful for audit trails, drift detection, and cross-agent invariants."
+                >
+                  <input
+                    type="checkbox"
+                    checked={includeObserver}
+                    onChange={(e) => setIncludeObserver(e.target.checked)}
+                    disabled={phase === 'running'}
+                  />
+                  <span>Add Observer</span>
+                </label>
+              )}
+              {/* ACS runtime-governance overlay. Works on any scenario:
+                each handoff is evaluated against the demo ACS manifest,
+                verdicts color the edges + show in the inspector. */}
               <label
-                className={`observer-toggle ${includeObserver ? 'on' : ''}`}
-                title="Adds a passive observer agent that taps every wire exchange. Useful for audit trails, drift detection, and cross-agent invariants."
+                className={`observer-toggle ${acsEnabled ? 'on' : ''}`}
+                title="Preview ACS governance on this scenario: each handoff is evaluated against the demo ACS manifest and verdicts (allow/warn/deny) color the edges and appear in the inspector — but the flow still runs. Author/validate your own manifest in the Validator tab."
               >
                 <input
                   type="checkbox"
-                  checked={includeObserver}
-                  onChange={(e) => setIncludeObserver(e.target.checked)}
+                  checked={acsEnabled}
+                  onChange={(e) => setAcsEnabled(e.target.checked)}
                   disabled={phase === 'running'}
                 />
-                <span>Add Observer</span>
+                <span>Preview ACS</span>
               </label>
-            )}
-            {/* "Clear" is shown only after a run completes — there's
+              {/* Enforce mode: a deny/escalate blocks the handoff and
+                halts the flow. Only meaningful while ACS is previewed. */}
+              {acsEnabled && (
+                <label
+                  className={`observer-toggle ${acsEnforce ? 'on' : ''}`}
+                  title="Enforce ACS verdicts: a deny/escalate stops the handoff before dispatch and halts the flow, instead of just previewing the verdict."
+                >
+                  <input
+                    type="checkbox"
+                    checked={acsEnforce}
+                    onChange={(e) => setAcsEnforce(e.target.checked)}
+                    disabled={phase === 'running'}
+                  />
+                  <span>Enforce ACS</span>
+                </label>
+              )}
+              {/* "Clear" is shown only after a run completes — there's
                 no run state to clear in idle, and Run-while-running
                 is already disabled. */}
-            {phase === 'done' && (
+              {phase === 'done' && (
+                <button
+                  className="btn"
+                  onClick={reset}
+                  title="Clear the post-run state (completed-step coloring, inspector selection) without re-running."
+                >
+                  Clear
+                </button>
+              )}
               <button
-                className="btn"
-                onClick={reset}
-                title="Clear the post-run state (completed-step coloring, inspector selection) without re-running."
+                className={phase === 'running' ? 'btn primary running' : 'btn primary'}
+                disabled={phase === 'running'}
+                onClick={runScenario}
+                title={
+                  phase === 'done'
+                    ? 'Re-run the scenario from the start. Clears the previous run state automatically.'
+                    : 'Run the scenario from the start.'
+                }
               >
-                Clear
+                {phase === 'running' ? 'Running…' : phase === 'done' ? 'Run again' : 'Run scenario'}
               </button>
-            )}
-            <button
-              className={
-                phase === 'running' ? 'btn primary running' : 'btn primary'
-              }
-              disabled={phase === 'running'}
-              onClick={runScenario}
-              title={
-                phase === 'done'
-                  ? 'Re-run the scenario from the start. Clears the previous run state automatically.'
-                  : 'Run the scenario from the start.'
-              }
-            >
-              {phase === 'running'
-                ? 'Running…'
-                : phase === 'done'
-                ? 'Run again'
-                : 'Run scenario'}
-            </button>
-          </div>
-        )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -1197,6 +1401,10 @@ export default function App() {
             onOpenBuiltin={(id) => {
               onSelectBuiltin(id);
               setMode('scenario');
+            }}
+            onOpenValidate={(target) => {
+              setValidateTarget(target);
+              setMode('validate');
             }}
           />
         ) : mode === 'scenario' ? (
@@ -1210,8 +1418,8 @@ export default function App() {
                 <div className="live-scenario-banner">
                   <span className="live-dot" aria-hidden />
                   <div className="live-text">
-                    <strong>Live HTTP scenario.</strong> Clicking{' '}
-                    <em>Run</em> will POST A2A JSON-RPC to{' '}
+                    <strong>Live HTTP scenario.</strong> Clicking <em>Run</em> will POST A2A
+                    JSON-RPC to{' '}
                     {activeScenario.externalUrls.map((url, i) => (
                       <span key={url}>
                         {i > 0 && ', '}
@@ -1219,9 +1427,8 @@ export default function App() {
                       </span>
                     ))}
                     . Each step's <code>expect.response_status</code> and{' '}
-                    <code>expect.response_contains</code> are evaluated
-                    against the live response body — same checks the
-                    CLI runs.
+                    <code>expect.response_contains</code> are evaluated against the live response
+                    body — same checks the CLI runs.
                   </div>
                 </div>
               )}
@@ -1232,21 +1439,15 @@ export default function App() {
                   so the user knows exactly which JSON to pick. */}
               {(() => {
                 const missing = activeScenario.agents.filter(
-                  (a) =>
-                    !a.card &&
-                    a.cardHint &&
-                    (showObserver || a.role !== 'observer')
+                  (a) => !a.card && a.cardHint && (showObserver || a.role !== 'observer'),
                 );
                 if (missing.length === 0) return null;
                 return (
                   <div className="cards-needed-banner">
-                    <span className="banner-label">
-                      Cards needed ({missing.length}):
-                    </span>
+                    <span className="banner-label">Cards needed ({missing.length}):</span>
                     <div className="banner-pills">
                       {missing.map((a) => {
-                        const filename =
-                          a.cardHint?.split(/[\\/]/).pop() ?? a.id;
+                        const filename = a.cardHint?.split(/[\\/]/).pop() ?? a.id;
                         return (
                           <button
                             key={a.id}
@@ -1271,19 +1472,25 @@ export default function App() {
                 );
               })()}
               {advanceTimeBanner && (
-                <div
-                  className="advance-time-banner"
-                  role="status"
-                  aria-live="polite"
-                >
+                <div className="advance-time-banner" role="status" aria-live="polite">
                   <span className="advance-time-icon" aria-hidden="true">
                     ⏱
                   </span>
                   <span className="advance-time-text">
                     Virtual time advanced by{' '}
-                    <strong>
-                      {formatVirtualTimeDelta(advanceTimeBanner.seconds)}
-                    </strong>
+                    <strong>{formatVirtualTimeDelta(advanceTimeBanner.seconds)}</strong>
+                  </span>
+                </div>
+              )}
+              {acsBlockedAt !== null && (
+                <div className="acs-blocked-banner" role="status" aria-live="polite">
+                  <span className="acs-blocked-icon" aria-hidden="true">
+                    ⛔
+                  </span>
+                  <span>
+                    Flow halted by ACS at step <strong>{acsBlockedAt}</strong> (
+                    {activeScenario.steps[acsBlockedAt]?.from} →{' '}
+                    {activeScenario.steps[acsBlockedAt]?.to}) — handoff denied before dispatch.
                   </span>
                 </div>
               )}
@@ -1301,6 +1508,13 @@ export default function App() {
                 fitViewOptions={{ padding: 0.18, minZoom: 0.4, maxZoom: 1.05 }}
                 minZoom={0.3}
                 maxZoom={1.8}
+                /* Touch: xyflow supports pinch-zoom + drag-pan natively;
+                   keeping these explicit documents the mobile intent
+                   (one-finger drag pans, two-finger pinch zooms). The
+                   responsive CSS guarantees the canvas real height so
+                   the graph stays usable on a phone (Option A). */
+                panOnDrag
+                zoomOnPinch
                 proOptions={{ hideAttribution: true }}
               >
                 <Background gap={16} color="#e2e8f0" />
@@ -1316,9 +1530,7 @@ export default function App() {
                     <li
                       key={s.index}
                       className={`step ${s.status}`}
-                      onClick={() =>
-                        setTarget({ kind: 'step', index: s.index })
-                      }
+                      onClick={() => setTarget({ kind: 'step', index: s.index })}
                     >
                       <span className="step-bullet" />
                       <span className="step-text">{s.text}</span>
@@ -1334,22 +1546,16 @@ export default function App() {
                   agentCard={inspectorAgent}
                   agentMeta={inspectorAgentMeta}
                   step={inspectorStep}
-                  stepResult={
-                    target?.kind === 'step'
-                      ? stepResults.get(target.index)
-                      : undefined
-                  }
+                  stepResult={target?.kind === 'step' ? stepResults.get(target.index) : undefined}
+                  acsVerdicts={target?.kind === 'step' ? acsVerdicts.get(target.index) : undefined}
                   onLoadCardForAgent={onLoadCardForAgent}
                 />
               </section>
 
-              {(activeScenario.runtimeKind === 'external' ||
-                conformanceResults.size > 0) && (
+              {(activeScenario.runtimeKind === 'external' || conformanceResults.size > 0) && (
                 <section
                   className={
-                    conformanceExpanded
-                      ? 'panel conformance'
-                      : 'panel conformance is-collapsed'
+                    conformanceExpanded ? 'panel conformance' : 'panel conformance is-collapsed'
                   }
                 >
                   <button
@@ -1359,15 +1565,10 @@ export default function App() {
                     aria-expanded={conformanceExpanded}
                     aria-controls="conformance-body"
                   >
-                    <span
-                      className="conformance-chevron"
-                      aria-hidden="true"
-                    >
+                    <span className="conformance-chevron" aria-hidden="true">
                       ▾
                     </span>
-                    <span className="conformance-title">
-                      A2A 1.0 conformance
-                    </span>
+                    <span className="conformance-title">A2A 1.0 conformance</span>
                     {/* Header summary visible whether expanded or not.
                         Lets users see the verdict without expanding. */}
                     {conformanceResults.size > 0 && !conformanceRunning && (
@@ -1385,11 +1586,7 @@ export default function App() {
                           const ok = failed === 0;
                           return (
                             <span
-                              className={
-                                ok
-                                  ? 'conformance-verdict ok'
-                                  : 'conformance-verdict fail'
-                              }
+                              className={ok ? 'conformance-verdict ok' : 'conformance-verdict fail'}
                             >
                               {ok ? '✓' : '✗'} {passed}/{total}
                             </span>
@@ -1398,9 +1595,7 @@ export default function App() {
                       </span>
                     )}
                     {conformanceRunning && (
-                      <span className="conformance-summary running">
-                        running…
-                      </span>
+                      <span className="conformance-summary running">running…</span>
                     )}
                   </button>
 
@@ -1409,131 +1604,121 @@ export default function App() {
                     className="conformance-body"
                     hidden={!conformanceExpanded}
                   >
-                  {conformanceRunning && (
-                    <div className="conformance-running">
-                      Running batch of {CHUNK_SIZE} contracts…
-                    </div>
-                  )}
-                  {!conformanceRunning &&
-                    conformanceResults.size === 0 &&
-                    activeScenario.externalUrls.length > 0 && (
-                      <div className="conformance-pending">
-                        <p>
-                          Spec-derived contract sweep — same {ALL_CONTRACTS.length}{' '}
-                          contracts the CLI's{' '}
-                          <code>a2a-testbed conformance</code> command
-                          runs; identical verdict. Paced in batches of{' '}
-                          {CHUNK_SIZE} so a sweep stays inside the
-                          target agent's rate-limit window.
-                        </p>
-                        <button
-                          type="button"
-                          className="conformance-run-btn"
-                          onClick={runNextConformanceBatch}
-                        >
-                          Run conformance ({CHUNK_SIZE} of {ALL_CONTRACTS.length})
-                        </button>
+                    {conformanceRunning && (
+                      <div className="conformance-running">
+                        Running batch of {CHUNK_SIZE} contracts…
                       </div>
                     )}
-                  {!conformanceRunning &&
-                    conformanceResults.size === 0 &&
-                    activeScenario.externalUrls.length === 0 && (
-                      <div className="conformance-pending">
-                        Conformance only runs against agents declared
-                        with <code>runtime: external</code>.
-                      </div>
-                    )}
-                  {[...conformanceResults.entries()].map(([url, results]) => {
-                    const sum = summarize(results);
-                    return (
-                      <div key={url} className="conformance-block">
-                        <div className="conformance-head">
-                          <span
-                            className={
-                              sum.failed === 0
-                                ? 'conformance-verdict ok'
-                                : 'conformance-verdict fail'
-                            }
-                          >
-                            {sum.failed === 0 ? '✓' : '✗'}{' '}
-                            {sum.passed}/{sum.total} passed
-                            {sum.softPasses > 0 &&
-                              ` · ${sum.softPasses} soft`}
-                          </span>
-                          <code className="conformance-url">{url}</code>
-                        </div>
-                        <ul className="conformance-list">
-                          {results.map((r) => (
-                            <li
-                              key={r.contractId}
-                              className={
-                                !r.passed
-                                  ? 'conformance-row fail'
-                                  : r.softPass
-                                  ? 'conformance-row soft'
-                                  : 'conformance-row ok'
-                              }
-                            >
-                              <span className="conformance-mark">
-                                {!r.passed ? '✗' : r.softPass ? '~' : '✓'}
-                              </span>
-                              <span className="conformance-section">
-                                {r.specSection ?? '—'}
-                              </span>
-                              <span className="conformance-name">
-                                {r.contractId.replace(/^transport\./, '')}
-                              </span>
-                              {r.detail && (
-                                <span className="conformance-detail">
-                                  {r.detail}
-                                </span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  })}
-                  {conformanceResults.size > 0 && (() => {
-                    // All URLs share the contract list, so any URL's
-                    // progress reflects sweep position. Pick the
-                    // smallest so the button reflects the trailing
-                    // agent in a multi-agent scenario.
-                    let minDone = ALL_CONTRACTS.length;
-                    for (const url of activeScenario.externalUrls) {
-                      const done = conformanceProgress.get(url) ?? 0;
-                      if (done < minDone) minDone = done;
-                    }
-                    const remaining = ALL_CONTRACTS.length - minDone;
-                    const nextBatch = Math.min(CHUNK_SIZE, remaining);
-                    return (
-                      <div className="conformance-footer">
-                        {remaining > 0 ? (
+                    {!conformanceRunning &&
+                      conformanceResults.size === 0 &&
+                      activeScenario.externalUrls.length > 0 && (
+                        <div className="conformance-pending">
+                          <p>
+                            Spec-derived contract sweep — same {ALL_CONTRACTS.length} contracts the
+                            CLI's <code>a2a-testbed conformance</code> command runs; identical
+                            verdict. Paced in batches of {CHUNK_SIZE} so a sweep stays inside the
+                            target agent's rate-limit window.
+                          </p>
                           <button
                             type="button"
                             className="conformance-run-btn"
                             onClick={runNextConformanceBatch}
-                            disabled={conformanceRunning}
                           >
-                            Run next {nextBatch} ({minDone}/
-                            {ALL_CONTRACTS.length} done)
+                            Run conformance ({CHUNK_SIZE} of {ALL_CONTRACTS.length})
                           </button>
-                        ) : (
-                          <span className="conformance-done">
-                            All {ALL_CONTRACTS.length} contracts run.
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          className="conformance-reset-btn"
-                          onClick={resetConformance}
-                          disabled={conformanceRunning}
-                        >
-                          Reset
-                        </button>
-                      </div>
-                    );
-                  })()}
+                        </div>
+                      )}
+                    {!conformanceRunning &&
+                      conformanceResults.size === 0 &&
+                      activeScenario.externalUrls.length === 0 && (
+                        <div className="conformance-pending">
+                          Conformance only runs against agents declared with{' '}
+                          <code>runtime: external</code>.
+                        </div>
+                      )}
+                    {[...conformanceResults.entries()].map(([url, results]) => {
+                      const sum = summarize(results);
+                      return (
+                        <div key={url} className="conformance-block">
+                          <div className="conformance-head">
+                            <span
+                              className={
+                                sum.failed === 0
+                                  ? 'conformance-verdict ok'
+                                  : 'conformance-verdict fail'
+                              }
+                            >
+                              {sum.failed === 0 ? '✓' : '✗'} {sum.passed}/{sum.total} passed
+                              {sum.softPasses > 0 && ` · ${sum.softPasses} soft`}
+                            </span>
+                            <code className="conformance-url">{url}</code>
+                          </div>
+                          <ul className="conformance-list">
+                            {results.map((r) => (
+                              <li
+                                key={r.contractId}
+                                className={
+                                  !r.passed
+                                    ? 'conformance-row fail'
+                                    : r.softPass
+                                      ? 'conformance-row soft'
+                                      : 'conformance-row ok'
+                                }
+                              >
+                                <span className="conformance-mark">
+                                  {!r.passed ? '✗' : r.softPass ? '~' : '✓'}
+                                </span>
+                                <span className="conformance-section">{r.specSection ?? '—'}</span>
+                                <span className="conformance-name">
+                                  {r.contractId.replace(/^transport\./, '')}
+                                </span>
+                                {r.detail && <span className="conformance-detail">{r.detail}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                    {conformanceResults.size > 0 &&
+                      (() => {
+                        // All URLs share the contract list, so any URL's
+                        // progress reflects sweep position. Pick the
+                        // smallest so the button reflects the trailing
+                        // agent in a multi-agent scenario.
+                        let minDone = ALL_CONTRACTS.length;
+                        for (const url of activeScenario.externalUrls) {
+                          const done = conformanceProgress.get(url) ?? 0;
+                          if (done < minDone) minDone = done;
+                        }
+                        const remaining = ALL_CONTRACTS.length - minDone;
+                        const nextBatch = Math.min(CHUNK_SIZE, remaining);
+                        return (
+                          <div className="conformance-footer">
+                            {remaining > 0 ? (
+                              <button
+                                type="button"
+                                className="conformance-run-btn"
+                                onClick={runNextConformanceBatch}
+                                disabled={conformanceRunning}
+                              >
+                                Run next {nextBatch} ({minDone}/{ALL_CONTRACTS.length} done)
+                              </button>
+                            ) : (
+                              <span className="conformance-done">
+                                All {ALL_CONTRACTS.length} contracts run.
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              className="conformance-reset-btn"
+                              onClick={resetConformance}
+                              disabled={conformanceRunning}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        );
+                      })()}
                   </div>
                 </section>
               )}
@@ -1541,7 +1726,7 @@ export default function App() {
           </>
         ) : (
           <div className="validate-shell">
-            <ValidatePanel />
+            <ValidatePanel initialTarget={validateTarget} />
           </div>
         )}
       </main>
@@ -1550,27 +1735,19 @@ export default function App() {
         <div className="footer-inner">
           <div className="footer-left">
             © {new Date().getFullYear()} a2a-testbed · Apache 2.0 ·{' '}
-            <a
-              href="https://a2a-testbed.com"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <a href="https://a2a-testbed.com" target="_blank" rel="noreferrer">
               a2a-testbed.com
             </a>{' '}
             ·{' '}
-            <a
-              href="https://github.com/ravikiran438/a2a-testbed"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <a href="https://github.com/ravikiran438/a2a-testbed" target="_blank" rel="noreferrer">
               github
             </a>
           </div>
           <div className="footer-mid">
             {mode === 'scenario' ? (
               <>
-                {activeScenario.steps.length}-step scenario ·{' '}
-                {activeScenario.name} · click a node or edge to inspect
+                {activeScenario.steps.length}-step scenario · {activeScenario.name} · click a node
+                or edge to inspect
               </>
             ) : mode === 'validate' ? (
               <>Browser-side JSON Schema validation · no backend</>
