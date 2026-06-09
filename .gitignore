@@ -18,7 +18,10 @@ var/
 wheels/
 *.egg-info/
 *.egg
-MANIFEST
+# Anchored to repo root: the sdist-generated MANIFEST file only. Unanchored
+# `MANIFEST` also matches src/a2a_testbed/manifest/ on case-insensitive
+# filesystems (macOS), which silently un-tracked that package.
+/MANIFEST
 
 # Virtual environments
 .venv
