@@ -1,0 +1,95 @@
+{
+  "manifest_version": "1.0.0",
+  "extension": {
+    "uri": "https://ravikiran438.github.io/phala-protocol/v1",
+    "name": "Phala Outcome Protocol",
+    "description": "Outcome events, satisfaction records, and belief-update propagation for A2A networks.",
+    "version": "1.0.0",
+    "publisher": "Ravi Kiran Kadaboina",
+    "human_readable_spec": "https://doi.org/10.5281/zenodo.19625612"
+  },
+  "agent_card_payload_schema": {
+    "$defs": {
+      "AdjustmentBounds": {
+        "description": "Declared minimum and maximum for a weight, for Update-Boundedness.",
+        "properties": {
+          "min": {
+            "description": "Minimum allowed weight value",
+            "title": "Min",
+            "type": "number"
+          },
+          "max": {
+            "description": "Maximum allowed weight value",
+            "title": "Max",
+            "type": "number"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "AdjustmentBounds",
+        "type": "object"
+      }
+    },
+    "description": "Phala-specific fields contributed to an A2A AgentCard.\n\nValidators detect Phala support by the presence of an entry in\n``capabilities.extensions[]`` whose ``uri`` equals ``PHALA_EXTENSION_URI``.\nThe body of that entry SHOULD deserialize to this model.",
+    "properties": {
+      "version": {
+        "description": "Phala protocol semver this agent implements (e.g. '1.0.0').",
+        "title": "Version",
+        "type": "string"
+      },
+      "outcome_endpoint": {
+        "description": "HTTPS URL where OutcomeEvents originating from this agent are POSTed. Read-back endpoint per OE-1 (every terminal task MUST produce exactly one OutcomeEvent).",
+        "title": "Outcome Endpoint",
+        "type": "string"
+      },
+      "satisfaction_endpoint": {
+        "description": "HTTPS URL where SatisfactionRecords are POSTed for outcomes produced by this agent.",
+        "title": "Satisfaction Endpoint",
+        "type": "string"
+      },
+      "belief_update_endpoint": {
+        "description": "HTTPS URL where BeliefUpdates targeting this agent are POSTed. REQUIRED so peers can deliver the propagated weight deltas the Phala learning loop depends on. Per BU-3 the agent MAY ignore individual updates, but the endpoint MUST exist and accept POST.",
+        "title": "Belief Update Endpoint",
+        "type": "string"
+      },
+      "weight_keys": {
+        "description": "Stable namespace of weight keys this agent will accept on a BeliefUpdate. Updates targeting unknown keys MAY be discarded.",
+        "items": {
+          "type": "string"
+        },
+        "title": "Weight Keys",
+        "type": "array"
+      },
+      "learning_rate": {
+        "description": "Base learning rate applied to BeliefUpdates this agent emits. Effective rate is modulated by the agent's WelfareTrace per WT-2.",
+        "exclusiveMinimum": 0.0,
+        "maximum": 1.0,
+        "title": "Learning Rate",
+        "type": "number"
+      },
+      "weight_bounds": {
+        "$ref": "#/$defs/AdjustmentBounds",
+        "description": "Per-weight clipping range for ``weight_delta``. All emitted BeliefUpdates MUST land within these bounds."
+      }
+    },
+    "required": [
+      "version",
+      "outcome_endpoint",
+      "satisfaction_endpoint",
+      "belief_update_endpoint",
+      "weight_keys",
+      "learning_rate",
+      "weight_bounds"
+    ],
+    "title": "PhalaServiceRef",
+    "type": "object"
+  },
+  "wire_artefacts": [],
+  "invariants": [
+    "OE-1: every terminal task MUST produce exactly one OutcomeEvent.",
+    "BU-1: BeliefUpdates MUST NOT carry raw signal_components.",
+    "WT-1: WelfareTraces are on-device only; never transmitted."
+  ]
+}

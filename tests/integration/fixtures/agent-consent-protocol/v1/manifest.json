@@ -1,0 +1,100 @@
+{
+  "manifest_version": "1.0.0",
+  "extension": {
+    "uri": "https://ravikiran438.github.io/agent-consent-protocol/v1",
+    "name": "Agent Consent and Adherence Protocol",
+    "description": "Versioned, machine-readable usage-policy adherence layer for A2A agents.",
+    "version": "1.0.0",
+    "publisher": "Ravi Kiran Kadaboina",
+    "human_readable_spec": "https://doi.org/10.5281/zenodo.19606339"
+  },
+  "agent_card_payload_schema": {
+    "description": "Pointer to a callee agent's PolicyDocument, embedded in the A2A AgentCard.\n\nAdded as a top-level 'usage_policy' field in the AgentCard JSON when the\nACAP extension URI is declared in capabilities.extensions:\n\n    {\n      \"capabilities\": {\n        \"extensions\": [\n          {\n            \"uri\": \"https://ravikiran438.github.io/agent-consent-protocol/v1\",\n            \"description\": \"Supports the Agent Consent and Adherence Protocol.\",\n            \"required\": true\n          }\n        ]\n      },\n      \"usage_policy\": { ... }\n    }\n\nCallers MUST fetch and verify the full PolicyDocument from document_uri\nbefore invoking any skill when acceptance_required is true.",
+    "properties": {
+      "version": {
+        "description": "Semver of the current PolicyDocument.",
+        "title": "Version",
+        "type": "string"
+      },
+      "document_uri": {
+        "description": "HTTPS URL where the PolicyDocument JSON is hosted.",
+        "title": "Document Uri",
+        "type": "string"
+      },
+      "document_hash": {
+        "description": "SHA-256 hex digest of the current PolicyDocument. Format: 'sha256:<hex>'.",
+        "title": "Document Hash",
+        "type": "string"
+      },
+      "effective_date": {
+        "description": "ISO 8601 UTC datetime from which this version is effective.",
+        "title": "Effective Date",
+        "type": "string"
+      },
+      "acceptance_required": {
+        "description": "Whether callers MUST complete the ACAP consent handshake before invoking any skill.",
+        "title": "Acceptance Required",
+        "type": "boolean"
+      },
+      "acceptance_endpoint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "HTTPS endpoint at which callers POST a ConsentRecord. REQUIRED when acceptance_required is true.",
+        "title": "Acceptance Endpoint"
+      },
+      "supersedes": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Semver of the previous PolicyDocument version.",
+        "title": "Supersedes"
+      },
+      "change_summary": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "One-line summary of material changes for agent reasoning.",
+        "title": "Change Summary"
+      },
+      "natural_language_uri": {
+        "description": "HTTPS URL of the human-readable Terms of Service.",
+        "title": "Natural Language Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "version",
+      "document_uri",
+      "document_hash",
+      "effective_date",
+      "acceptance_required",
+      "natural_language_uri"
+    ],
+    "title": "UsagePolicyRef",
+    "type": "object"
+  },
+  "wire_artefacts": [],
+  "invariants": [
+    "Records form an append-only linked chain per agent-pair per policy version.",
+    "Caller MUST parse every PolicyClaim before invoking any skill."
+  ]
+}

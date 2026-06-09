@@ -46,9 +46,7 @@ def _make_card(host: str, port: int) -> dict:
         "description": "Demo card for testbed manifest validator",
         "version": "1.0.0",
         "url": base,
-        "supportedInterfaces": [
-            {"url": f"{base}/", "protocolBinding": "JSONRPC"}
-        ],
+        "supportedInterfaces": [{"url": f"{base}/", "protocolBinding": "JSONRPC"}],
         "skills": [
             {
                 "id": "demo",
@@ -88,8 +86,14 @@ def _make_card(host: str, port: int) -> dict:
     }
 
 
+# Manifest fixtures are vendored under tests/integration/fixtures/ so this
+# test is self-contained and runs without the protocol repos checked out
+# alongside it.
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
 def _load_manifest(repo: str) -> ExtensionManifest:
-    path = REPO_ROOT.parent / repo / "v1" / "manifest.json"
+    path = _FIXTURES / repo / "v1" / "manifest.json"
     return ExtensionManifest.model_validate_json(path.read_text(encoding="utf-8"))
 
 
@@ -126,9 +130,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _rewrite_manifest_uri(
-        self, manifest: ExtensionManifest, expected_path: str
-    ) -> bytes:
+    def _rewrite_manifest_uri(self, manifest: ExtensionManifest, expected_path: str) -> bytes:
         host, port = self.server.server_address
         copy = manifest.model_dump(by_alias=True, exclude_none=True)
         copy["extension"]["uri"] = f"http://{host}:{port}{expected_path}"
@@ -173,6 +175,7 @@ def test_card_command_reports_unknown_uris(fake_agent_server):
     import httpx
 
     base = fake_agent_server
+
     async def run() -> list:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{base}/.well-known/agent-card.json")
@@ -195,6 +198,7 @@ def test_card_command_catches_broken_payload(fake_agent_server):
     import httpx
 
     base = fake_agent_server
+
     async def run() -> list:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{base}/.well-known/agent-card.json")
@@ -228,15 +232,11 @@ def test_in_memory_store_short_circuits_http(monkeypatch):
     )
     card = {
         "name": "x",
-        "capabilities": {
-            "extensions": [{"uri": uri, "params": {"any": "object"}}]
-        },
+        "capabilities": {"extensions": [{"uri": uri, "params": {"any": "object"}}]},
     }
 
     async def run() -> list:
-        return await validate_agent_card(
-            card, store=InMemoryManifestStore({uri: manifest})
-        )
+        return await validate_agent_card(card, store=InMemoryManifestStore({uri: manifest}))
 
     findings = asyncio.run(run())
     assert len(findings) == 1
