@@ -1,4 +1,5 @@
 import type { Mode } from './App';
+import { HeroArt } from './HeroArt';
 
 interface Props {
   onOpen: (mode: Mode) => void;
@@ -13,7 +14,7 @@ interface Props {
 }
 
 interface ToolCard {
-  id: 'scenario' | 'validate' | 'acs' | 'polyglot' | 'live-llm';
+  id: 'scenario' | 'validate' | 'acs' | 'agui' | 'polyglot' | 'live-llm';
   title: string;
   body: string;
   cta: string;
@@ -54,6 +55,18 @@ const TOOLS: ToolCard[] = [
       "agent's lifecycle checkpoints. Same structural + semantic checks " +
       'as the `a2a-testbed acs validate` CLI, with zero backend.',
     cta: 'Validate ACS manifest',
+    badge: 'new',
+  },
+  {
+    id: 'agui',
+    title: 'Governance over AG-UI',
+    body:
+      'Project an ACS verdict onto AG-UI — the agent ↔ human transport. ' +
+      'allow / warn surface as a non-blocking annotation, deny is a terminal ' +
+      'error, and escalate becomes a human-in-the-loop interrupt you resolve ' +
+      'in the browser (fail-closed — only Approve allows). Mirrors the ' +
+      'a2a_testbed.ag_ui projection, plus a full multi-protocol run end-to-end.',
+    cta: 'Open AG-UI',
     badge: 'new',
   },
   {
@@ -162,6 +175,18 @@ const REFERENCES: RefCard[] = [
     role: 'Agent-to-tool integration',
   },
   {
+    name: 'AG-UI (Agent-User Interaction)',
+    one_liner:
+      'Open protocol for the agent ↔ human edge: lifecycle, text, tool-call, ' +
+      'state, and interrupt events between an agent and a user-facing app. ' +
+      'Authored by CopilotKit. Completes the picture alongside A2A (agent ↔ ' +
+      'agent) and MCP (agent ↔ tool). The testbed projects ACS verdicts onto ' +
+      'AG-UI so a governed handoff can pause for human review.',
+    href: 'https://github.com/ag-ui-protocol/ag-ui',
+    role: 'Agent-to-human interaction',
+    link_label: 'See the AG-UI protocol ↗',
+  },
+  {
     name: 'Extension manifest convention',
     one_liner:
       'A2A 1.0 specifies extension URIs but not how to validate the ' +
@@ -236,6 +261,9 @@ export function HomePage({ onOpen, onOpenBuiltin, onOpenValidate }: Props) {
   return (
     <div className="home">
       <section className="hero">
+        <div className="hero-art">
+          <HeroArt />
+        </div>
         <div className="hero-tag">
           A2A multi-agent testbed
           <span className="hero-domain"> · a2a-testbed.com</span>
@@ -252,6 +280,13 @@ export function HomePage({ onOpen, onOpenBuiltin, onOpenValidate }: Props) {
           warn / deny / escalate verdicts at each lifecycle checkpoint, fail-closed enforcement that
           blocks a handoff before it's sent, validated in both the CLI and the browser.
         </p>
+        <p className="hero-lead">
+          And carry those decisions to the human. <strong>AG-UI</strong> is the agent&#8596;human
+          transport; when a control needs a person — approve this, rate that — the testbed projects
+          the ACS verdict onto an AG-UI <em>interrupt</em> and resolves it fail-closed, right in the
+          browser. Governance on the agent&#8596;agent edge, made visible on the agent&#8596;human
+          one.
+        </p>
         <p className="hero-sublead">
           <strong>Harness-agnostic.</strong> Whatever runtime your agent lives inside — Claude Code,
           Codex, LangGraph, CrewAI, OpenHarness, or your own — the testbed validates that what it
@@ -266,6 +301,9 @@ export function HomePage({ onOpen, onOpenBuiltin, onOpenValidate }: Props) {
           </button>
           <button className="btn" onClick={() => onOpenValidate('acs')}>
             Validate an ACS manifest
+          </button>
+          <button className="btn" onClick={() => onOpen('agui')}>
+            Governance over AG-UI
           </button>
         </div>
       </section>

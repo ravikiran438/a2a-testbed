@@ -142,9 +142,11 @@
 .actions {
   display: flex;
   gap: 8px;
-  /* Let the action buttons (picker, Load YAML, Add Observer, Preview ACS,
-     Enforce ACS, Clear, Run) wrap and stay right-aligned rather than
-     pushing the Run button past the edge of the screen. */
+  /* Own full-width row beneath the brand/nav line. Pinning the action bar
+     to its own row means toggling Preview ACS (which reveals the Enforce +
+     manifest controls) fills this row in place instead of overflowing the
+     header line and wrapping — which read as the toolbar "jumping". */
+  flex-basis: 100%;
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
@@ -2171,4 +2173,324 @@
     font-size: 12.5px;
     padding: 9px 6px;
   }
+}
+
+/* Liquid-glass hero band on the Home page */
+.hero-art {
+  margin: 0 0 26px;
+}
+.hero-art-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 22px;
+  box-shadow:
+    0 18px 50px -18px rgba(36, 20, 69, 0.55),
+    0 2px 0 0 rgba(255, 255, 255, 0.5) inset;
+}
+
+/* ===================================================================
+   Governance over AG-UI — standalone tab + Inspector projection rows
+   =================================================================== */
+
+.agui-main-shell {
+  display: block;
+  overflow-y: auto;
+  background: #f8fafc;
+}
+.agui-shell {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 22px 48px;
+  color: #0f172a;
+}
+.agui-intro h1 {
+  font-size: 26px;
+  margin: 0 0 8px;
+}
+.agui-intro p,
+.agui-sub {
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.agui-block {
+  margin-top: 30px;
+  padding: 18px 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.agui-block h2 {
+  font-size: 17px;
+  margin: 0 0 4px;
+}
+.agui-block-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.agui-block-head h2 {
+  margin: 0;
+}
+.agui-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+.agui-badge.interactive {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.agui-badge.reference {
+  background: #f1f5f9;
+  color: #475569;
+}
+/* Interactive block carries the live accent; reference block reads as muted. */
+.agui-interactive {
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 1px #bfdbfe;
+}
+.agui-reference {
+  background: #fbfcfe;
+}
+.agui-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0 6px;
+}
+.agui-divider span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  background: #f8fafc;
+  padding: 0 10px;
+}
+.agui-sub {
+  margin: 0 0 14px;
+}
+.agui-block code,
+.agui-intro code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* interactive verdict -> AG-UI projector */
+.agui-proj-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.agui-proj-label,
+.agui-resolve-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.agui-proj-maps {
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 8px;
+}
+.agui-resolve {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.agui-resolved {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.agui-resolved.acs-allow {
+  background: #dcfce7;
+  color: #166534;
+}
+.agui-resolved.acs-deny {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* narrated run stream */
+.agui-stream {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 22px;
+  position: relative;
+}
+.agui-stream::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: #e2e8f0;
+}
+.agui-ev {
+  position: relative;
+  margin: 0 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 9px 12px;
+}
+.agui-ev::before {
+  content: "";
+  position: absolute;
+  left: -19px;
+  top: 14px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 2px solid #ffffff;
+}
+.agui-ev.human::before {
+  background: #b4530a;
+}
+.agui-ev.gate {
+  border-left: 4px solid #b4530a;
+}
+.agui-ev-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+}
+.agui-etype {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.agui-proto {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+.agui-gate-tag {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: #b4530a;
+  color: #fff;
+}
+.agui-gate-tag.inline {
+  vertical-align: middle;
+}
+.agui-arrow {
+  color: #94a3b8;
+  font-size: 11px;
+}
+.agui-ev-desc {
+  font-size: 13px;
+  color: #475569;
+  margin-top: 3px;
+}
+.agui-ev .inspector-json {
+  margin-top: 8px;
+}
+.agui-foot {
+  margin-top: 28px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* Inspector projection rows (wired into the ACS canvas) */
+.agui-projection {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.agui-row {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.agui-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  width: 100%;
+  background: #f8fafc;
+  border: none;
+  padding: 5px 8px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.agui-maps {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #334155;
+}
+.agui-ip {
+  font-size: 10.5px;
+  color: #64748b;
+}
+.agui-detail {
+  padding: 7px 8px;
+}
+.agui-detail .inspector-json {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ACS manifest selector in the scenario action bar */
+.acs-manifest-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-left: 6px;
+}
+.acs-manifest-name {
+  font-size: 12px;
+  color: #475569;
+}
+.acs-manifest-name strong {
+  color: #0f172a;
+}
+.acs-manifest-err {
+  font-size: 12px;
+  color: #991b1b;
+  background: #fee2e2;
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 320px;
+}
+
+/* AG-UI tab: empty state when no run has produced verdicts yet */
+.agui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0 2px;
 }

@@ -7,10 +7,12 @@ import {
   Position,
   ReactFlow,
 } from '@xyflow/react';
+import yaml from 'js-yaml';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { AgentNode } from './AgentNode';
+import { AgUiPanel, type RunVerdict } from './AgUiPanel';
 import {
   AcsEvaluator,
   type AcsManifestObj,
@@ -20,6 +22,7 @@ import {
   stepRequestPayload,
   type Verdict,
 } from './acsEvaluator';
+import { validateAcsManifest } from './acsValidator';
 import { BUILTIN_SCENARIOS, type BuiltinScenarioDef, findBuiltin } from './builtins';
 import { CloudflareAnalytics } from './CloudflareAnalytics';
 import { CustomScenarioPanel } from './CustomScenarioPanel';
@@ -33,7 +36,7 @@ import { adaptSteps, type LoadedScenario, layoutAgents, parseScenarioYaml } from
 import { ValidatePanel, type ValidateTarget } from './ValidatePanel';
 import './App.css';
 
-export type Mode = 'home' | 'scenario' | 'validate';
+export type Mode = 'home' | 'scenario' | 'validate' | 'agui';
 
 const nodeTypes = { agent: AgentNode };
 
@@ -529,10 +532,11 @@ function isObserverStep(step: ScenarioStep): boolean {
 }
 
 // Demo ACS governance manifest applied in the scenario view when ACS is
-// toggled on. Mirrors examples/acs/three-party-governance.acs.yaml: deny
-// handoffs to an externally-labelled agent, warn on regulated content.
-// Tools are keyed by agent id, so it lights up the three-party scenario;
-// on other scenarios (no matching tools) it cleanly yields allow/warn.
+// toggled on. Mirrors examples/acs/three-party-governance.acs.yaml: escalate
+// consent decisions to a human, deny handoffs to an externally-labelled agent,
+// warn on regulated content. Tools are keyed by agent id, so it lights up the
+// three-party scenario; on other scenarios (no matching tools) it cleanly
+// yields allow/warn.
 const DEMO_ACS_MANIFEST: AcsManifestObj = {
   agent_control_specification_version: '0.3.1-beta',
   policies: {
@@ -540,6 +544,19 @@ const DEMO_ACS_MANIFEST: AcsManifestObj = {
       type: 'builtin',
       default_decision: 'allow',
       rules: [
+        {
+          // Consent is the human-in-the-loop moment: a grant_consent handoff
+          // pauses for the principal/guardian rather than auto-proceeding.
+          // Ordered first so it wins over the generic external-deny below —
+          // and over AG-UI this projects to a RUN_FINISHED interrupt, not a
+          // RUN_ERROR.
+          name: 'escalate-consent',
+          field: 'policy_target.value.message.parts.0.text',
+          op: 'contains',
+          value: 'consent',
+          decision: 'escalate',
+          description: 'consent decision — pause for the principal/guardian (human-in-the-loop)',
+        },
         {
           name: 'deny-external-receiver',
           field: 'tool.security_labels',
@@ -637,6 +654,14 @@ export default function App() {
   const [acsVerdicts, setAcsVerdicts] = useState<Map<number, Verdict[]>>(new Map());
   // Step index where enforce mode halted the flow, or null.
   const [acsBlockedAt, setAcsBlockedAt] = useState<number | null>(null);
+  // The ACS manifest the canvas run evaluates against. Defaults to the
+  // bundled demo; the user can load their own (parsed + validated) so the
+  // scenario AND the policy are theirs.
+  const [acsManifest, setAcsManifest] = useState<AcsManifestObj>(DEMO_ACS_MANIFEST);
+  const [acsManifestName, setAcsManifestName] = useState('demo manifest');
+  const [acsManifestError, setAcsManifestError] = useState<string | null>(null);
+  const acsFileInputRef = useRef<HTMLInputElement>(null);
+  const usingCustomManifest = acsManifest !== DEMO_ACS_MANIFEST;
   // Initialize from localStorage if a custom scenario was saved last
   // session, otherwise the bundled demo.
   const [activeScenario, setActiveScenario] = useState<ActiveScenario>(
@@ -944,7 +969,7 @@ export default function App() {
     // Register no-op evidence providers for any declared evidence ids
     // so the policy logic is what's exercised (the demo declares none).
     const acsEval = new AcsEvaluator({ failClosed: true });
-    for (const d of Object.values(DEMO_ACS_MANIFEST.intervention_points ?? {})) {
+    for (const d of Object.values(acsManifest.intervention_points ?? {})) {
       for (const evId of d.evidence ?? []) {
         acsEval.registerEvidence(evId, () => ({}));
       }
@@ -992,8 +1017,8 @@ export default function App() {
         };
         const preVerdicts: Verdict[] = [];
         for (const point of PRE_POINTS) {
-          if (!DEMO_ACS_MANIFEST.intervention_points?.[point]) continue;
-          preVerdicts.push(acsEval.evaluate(DEMO_ACS_MANIFEST, point, snapshotFor(point, preExch)));
+          if (!acsManifest.intervention_points?.[point]) continue;
+          preVerdicts.push(acsEval.evaluate(acsManifest, point, snapshotFor(point, preExch)));
         }
         if (preVerdicts.length > 0) {
           setAcsVerdicts((prev) => new Map(prev).set(i, preVerdicts));
@@ -1052,10 +1077,8 @@ export default function App() {
         };
         const postVerdicts: Verdict[] = [];
         for (const point of POST_POINTS) {
-          if (!DEMO_ACS_MANIFEST.intervention_points?.[point]) continue;
-          postVerdicts.push(
-            acsEval.evaluate(DEMO_ACS_MANIFEST, point, snapshotFor(point, postExch)),
-          );
+          if (!acsManifest.intervention_points?.[point]) continue;
+          postVerdicts.push(acsEval.evaluate(acsManifest, point, snapshotFor(point, postExch)));
         }
         if (postVerdicts.length > 0) {
           setAcsVerdicts((prev) => {
@@ -1077,7 +1100,7 @@ export default function App() {
     // Conformance is now user-triggered (chunked, one batch at a
     // time) instead of auto-running here — bursting all 58 contracts
     // back-to-back can trip an external agent's per-IP rate limit.
-  }, [showObserver, activeScenario, acsEnabled, acsEnforce]);
+  }, [showObserver, activeScenario, acsEnabled, acsEnforce, acsManifest]);
 
   /**
    * Run the next chunk of conformance contracts against every
@@ -1133,6 +1156,53 @@ export default function App() {
     setAcsBlockedAt(null);
     setTarget(null);
   }, []);
+
+  /** Load + validate a user-supplied ACS manifest (YAML or JSON) so the
+   *  canvas run governs against the user's own policy. Reuses the same
+   *  validator the Validator tab uses; only a structurally-valid manifest
+   *  is accepted, and Preview ACS is switched on so the effect is visible. */
+  const onLoadAcsManifest = useCallback(async (file: File) => {
+    const text = await file.text();
+    const result = validateAcsManifest(text);
+    if (!result.ok) {
+      const firstErr = result.findings.find((f) => f.detail)?.detail ?? 'invalid ACS manifest';
+      setAcsManifestError(`${file.name}: ${firstErr}`);
+      return;
+    }
+    try {
+      const parsed = yaml.load(text) as AcsManifestObj;
+      setAcsManifest(parsed);
+      setAcsManifestName(file.name);
+      setAcsManifestError(null);
+      setAcsEnabled(true);
+    } catch (err) {
+      setAcsManifestError(`${file.name}: ${(err as Error).message}`);
+    }
+  }, []);
+
+  const resetAcsManifest = useCallback(() => {
+    setAcsManifest(DEMO_ACS_MANIFEST);
+    setAcsManifestName('demo manifest');
+    setAcsManifestError(null);
+  }, []);
+
+  // Flatten the last run's per-step verdicts into a labelled list the
+  // standalone AG-UI tab can project live (real verdicts from the loaded
+  // scenario + active manifest, not hand-picked ones).
+  const runVerdicts: RunVerdict[] = useMemo(() => {
+    const out: RunVerdict[] = [];
+    const indices = [...acsVerdicts.keys()].sort((a, b) => a - b);
+    for (const stepIdx of indices) {
+      const step = activeScenario.steps[stepIdx];
+      for (const v of acsVerdicts.get(stepIdx) ?? []) {
+        out.push({
+          label: `step ${stepIdx + 1} · ${step?.from ?? '?'} → ${step?.to ?? '?'} · ${v.intervention_point}`,
+          verdict: v,
+        });
+      }
+    }
+    return out;
+  }, [acsVerdicts, activeScenario]);
 
   const onNodeClick = useCallback((_: unknown, node: Node) => {
     const cardId = (node.data as { cardId: string }).cardId;
@@ -1259,6 +1329,12 @@ export default function App() {
             >
               Validator
             </button>
+            <button
+              className={`mode-btn ${mode === 'agui' ? 'active' : ''}`}
+              onClick={() => setMode('agui')}
+            >
+              AG-UI
+            </button>
           </nav>
           <nav className="ext-links">
             <a href="https://a2a-protocol.org/" target="_blank" rel="noreferrer">
@@ -1339,7 +1415,7 @@ export default function App() {
                 verdicts color the edges + show in the inspector. */}
               <label
                 className={`observer-toggle ${acsEnabled ? 'on' : ''}`}
-                title="Preview ACS governance on this scenario: each handoff is evaluated against the demo ACS manifest and verdicts (allow/warn/deny) color the edges and appear in the inspector — but the flow still runs. Author/validate your own manifest in the Validator tab."
+                title="Preview ACS governance on this scenario: each handoff is evaluated against the active ACS manifest and verdicts (allow/warn/deny/escalate) color the edges and appear in the inspector — but the flow still runs. Load your own manifest with the button alongside, or keep the bundled demo."
               >
                 <input
                   type="checkbox"
@@ -1365,6 +1441,54 @@ export default function App() {
                   <span>Enforce ACS</span>
                 </label>
               )}
+              {/* ACS manifest selector: the canvas run governs against
+                whichever manifest is active. Defaults to the bundled
+                demo; "Load manifest" swaps in the user's own policy so
+                both the scenario and the governance are theirs. */}
+              {acsEnabled && (
+                <span className="acs-manifest-ctl">
+                  <span
+                    className="acs-manifest-name"
+                    title={
+                      usingCustomManifest
+                        ? 'Your loaded ACS manifest governs this run.'
+                        : 'The bundled demo manifest governs this run.'
+                    }
+                  >
+                    manifest: <strong>{acsManifestName}</strong>
+                  </span>
+                  <button
+                    className="btn small"
+                    onClick={() => acsFileInputRef.current?.click()}
+                    disabled={phase === 'running'}
+                    title="Load your own ACS manifest (YAML or JSON) to govern this run."
+                  >
+                    Load manifest
+                  </button>
+                  {usingCustomManifest && (
+                    <button
+                      className="btn small"
+                      onClick={resetAcsManifest}
+                      disabled={phase === 'running'}
+                      title="Revert to the bundled demo manifest."
+                    >
+                      Use demo
+                    </button>
+                  )}
+                  {acsManifestError && <span className="acs-manifest-err">{acsManifestError}</span>}
+                </span>
+              )}
+              <input
+                ref={acsFileInputRef}
+                type="file"
+                accept=".yaml,.yml,.json,application/json,text/yaml"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onLoadAcsManifest(f);
+                  e.target.value = '';
+                }}
+              />
               {/* "Clear" is shown only after a run completes — there's
                 no run state to clear in idle, and Run-while-running
                 is already disabled. */}
@@ -1394,7 +1518,11 @@ export default function App() {
         </div>
       </header>
 
-      <main className={mode === 'home' ? 'home-shell' : 'canvas-shell'}>
+      <main
+        className={
+          mode === 'home' ? 'home-shell' : mode === 'agui' ? 'agui-main-shell' : 'canvas-shell'
+        }
+      >
         {mode === 'home' ? (
           <HomePage
             onOpen={setMode}
@@ -1724,10 +1852,16 @@ export default function App() {
               )}
             </aside>
           </>
-        ) : (
+        ) : mode === 'validate' ? (
           <div className="validate-shell">
             <ValidatePanel initialTarget={validateTarget} />
           </div>
+        ) : (
+          <AgUiPanel
+            runVerdicts={runVerdicts}
+            scenarioName={activeScenario.name}
+            onOpenScenario={() => setMode('scenario')}
+          />
         )}
       </main>
 
@@ -1751,6 +1885,8 @@ export default function App() {
               </>
             ) : mode === 'validate' ? (
               <>Browser-side JSON Schema validation · no backend</>
+            ) : mode === 'agui' ? (
+              <>Governance over AG-UI · ACS verdicts projected to the agent↔human transport</>
             ) : (
               <>Experimental tooling for the A2A protocol</>
             )}

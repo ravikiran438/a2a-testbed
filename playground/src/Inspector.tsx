@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { Verdict } from './acsEvaluator';
+import { type AgUiEvent, projectVerdict, resolveEscalation } from './agUiProjection';
 import type { AgentCard, ScenarioStep } from './scenario';
 
 export type InspectorTarget =
@@ -185,6 +187,21 @@ export function Inspector({
           </div>
         )}
 
+        {/* Governance over AG-UI: each ACS verdict for this handoff,
+            projected onto the agent<->human transport. escalate becomes
+            an interactive human-in-the-loop interrupt; deny a RUN_ERROR;
+            allow/warn a CUSTOM annotation. Mirrors a2a_testbed.ag_ui. */}
+        {acsVerdicts && acsVerdicts.length > 0 && (
+          <div className="inspector-section">
+            <div className="inspector-label">Governance over AG-UI</div>
+            <ul className="agui-projection">
+              {acsVerdicts.map((v, i) => (
+                <AgUiVerdictRow key={i} verdict={v} />
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* User-authored expectations from the YAML. When the step
             ran against a real external agent we render the live
             check results; otherwise the static "not enforced" note. */}
@@ -251,4 +268,69 @@ export function Inspector({
   }
 
   return null;
+}
+
+/**
+ * One ACS verdict, projected onto AG-UI. Shows the event type the verdict
+ * maps to and its wire JSON. For an `escalate` verdict the projection is a
+ * human-in-the-loop interrupt, so we render Approve/Deny — the resolution is
+ * fail-closed (only Approve yields `allow`), mirroring resolveEscalation().
+ */
+function AgUiVerdictRow({ verdict }: { verdict: Verdict }) {
+  const [open, setOpen] = useState(false);
+  const [resolved, setResolved] = useState<'allow' | 'deny' | null>(null);
+  const event: AgUiEvent = projectVerdict(verdict);
+
+  const label =
+    event.type === 'RUN_FINISHED'
+      ? 'RUN_FINISHED · interrupt'
+      : event.type === 'RUN_ERROR'
+        ? 'RUN_ERROR'
+        : 'CUSTOM';
+
+  const isEscalate = event.type === 'RUN_FINISHED';
+
+  function decide(approved: boolean) {
+    if (event.type !== 'RUN_FINISHED') return;
+    const interrupt = event.outcome.interrupts[0];
+    const decision = resolveEscalation(interrupt, {
+      interruptId: interrupt.id,
+      status: 'resolved',
+      payload: { approved },
+    });
+    setResolved(decision as 'allow' | 'deny');
+  }
+
+  return (
+    <li className={`agui-row acs-${verdict.decision}`}>
+      <button type="button" className="agui-head" onClick={() => setOpen((o) => !o)}>
+        <span className="agui-arrow">{open ? '▾' : '▸'}</span>
+        <span className="acs-decision">{verdict.decision}</span>
+        <span className="agui-maps">→ {label}</span>
+        <span className="agui-ip">{verdict.intervention_point}</span>
+      </button>
+      {open && (
+        <div className="agui-detail">
+          <pre className="inspector-json">{JSON.stringify(event, null, 2)}</pre>
+          {isEscalate && (
+            <div className="agui-resolve">
+              <span className="agui-resolve-label">Human-in-the-loop:</span>
+              <button type="button" className="btn small" onClick={() => decide(true)}>
+                Approve
+              </button>
+              <button type="button" className="btn small" onClick={() => decide(false)}>
+                Deny
+              </button>
+              {resolved && (
+                <span className={`agui-resolved acs-${resolved}`}>
+                  resolved → <strong>{resolved}</strong>
+                  {resolved === 'deny' ? ' (fail-closed)' : ''}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
 }
