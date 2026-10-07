@@ -8,7 +8,7 @@ pre-commit:
       stage_fixed: true
     ruff:
       glob: "*.py"
-      run: ruff check --fix {staged_files} && ruff format {staged_files}
+      run: uv run --extra dev ruff check --fix {staged_files} && uv run --extra dev ruff format {staged_files}
       stage_fixed: true
 
 pre-push:
@@ -18,4 +18,4 @@ pre-push:
       root: "playground/"
       run: pnpm exec tsc -b
     pytest:
-      run: pytest -q
+      run: uv run --extra dev pytest -q
