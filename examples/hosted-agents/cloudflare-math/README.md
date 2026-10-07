@@ -1,6 +1,6 @@
 # A2A math agent (Cloudflare Workers + Groq)
 
-A minimal A2A 1.0 compliant agent that answers arithmetic and short
+A minimal A2A 1.0 compliant agent (also serving A2A 0.3 clients) that answers arithmetic and short
 word-math problems via Groq's Llama 3.3 in JSON mode. Deployed as a
 single Cloudflare Worker; runs on the free tier with zero cold start.
 
@@ -63,24 +63,47 @@ https://math.a2a-testbed.com
 # 1. AgentCard discovery
 curl https://math.a2a-testbed.com/.well-known/agent-card.json
 
-# 2. Round-trip a math question
+# 2. Round-trip a math question (A2A 1.0)
 curl -X POST https://math.a2a-testbed.com \
   -H 'content-type: application/json' \
+  -H 'A2A-Version: 1.0' \
   -d '{
     "jsonrpc": "2.0",
     "id": "1",
-    "method": "message/send",
+    "method": "SendMessage",
     "params": {
       "message": {
+        "messageId": "m1",
         "role": "ROLE_USER",
-        "parts": [{"kind": "text", "text": "What is 12 * 7?"}]
+        "parts": [{"text": "What is 12 * 7?"}]
       }
     }
   }'
 ```
 
 Expected: a JSON-RPC envelope whose `result.message.parts[0].text` is
-the JSON string `{"answer": 84, "explanation": "..."}`.
+the JSON string `{"answer": 84, "explanation": "..."}`. The agent is
+stateless, so it answers with a Message (`{"message": {...}}`), not a
+Task.
+
+### A2A 0.3 clients
+
+The same URL serves A2A 0.3 (the card lists a `"protocolVersion": "0.3"`
+interface after the preferred 1.0 one). Send the 0.3 method name with no
+`A2A-Version` header and the reply is a 0.3 Message
+(`{"kind": "message", "role": "agent", "parts": [{"kind": "text", ...}]}`):
+
+```bash
+curl -X POST https://math.a2a-testbed.com \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"message/send",
+       "params":{"message":{"messageId":"m1","role":"user",
+       "parts":[{"kind":"text","text":"What is 12 * 7?"}]}}}'
+```
+
+A 1.0 method name without `A2A-Version: 1.0` is rejected with
+`-32009` (VersionNotSupported): per A2A 1.0 §3.6.2 an absent header
+means 0.3, which has no `SendMessage`.
 
 ## Test against the testbed
 

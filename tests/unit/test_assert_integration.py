@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from a2a_testbed.acs import AcsEvaluator, validate_manifest
 from examples.assert_integration.a2a_acs_target import (
     build_request,
     current_turn_text,
@@ -22,8 +23,6 @@ from examples.assert_integration.a2a_acs_target import (
     extract_text,
     render_for_judge,
 )
-from a2a_testbed.acs import AcsEvaluator, validate_manifest
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "examples" / "acs" / "three-party-governance.acs.yaml"
@@ -31,8 +30,12 @@ MANIFEST = REPO_ROOT / "examples" / "acs" / "three-party-governance.acs.yaml"
 
 def test_build_request_shape():
     req = build_request("hello world")
-    assert req["method"] == "message/send"
-    assert req["params"]["message"]["parts"][0]["text"] == "hello world"
+    assert req["method"] == "SendMessage"  # A2A 1.0 by default
+    assert req["params"]["message"]["parts"][0] == {"text": "hello world"}
+    assert req["params"]["message"]["messageId"]
+    legacy = build_request("hello world", protocol_version="0.3")
+    assert legacy["method"] == "message/send"
+    assert legacy["params"]["message"]["parts"][0] == {"kind": "text", "text": "hello world"}
     assert "contextId" not in req["params"]["message"]
     # contextId is attached when provided.
     req2 = build_request("hi", context_id="ctx-abc")
@@ -60,6 +63,13 @@ def test_extract_text_variants():
     assert extract_text({"result": "plain"}) == "plain"
     assert extract_text({"result": {"parts": [{"text": "a"}, {"text": "b"}]}}) == "a b"
     assert extract_text({"result": {"message": {"parts": [{"text": "hi"}]}}}) == "hi"
+    # A2A 1.0 Task result: reply in the status message or an artifact.
+    task_reply = {"task": {"id": "t", "status": {"message": {"parts": [{"text": "done"}]}}}}
+    assert extract_text({"result": task_reply}) == "done"
+    artifact_reply = {
+        "task": {"id": "t", "status": {}, "artifacts": [{"parts": [{"text": "art"}]}]}
+    }
+    assert extract_text({"result": artifact_reply}) == "art"
     # Unknown shape falls back to a JSON dump (never throws).
     assert "weird" in extract_text({"weird": 1})
 

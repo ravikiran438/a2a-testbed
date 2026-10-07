@@ -1,23 +1,37 @@
 // Streaming SSE + Subscribe-to-task + Push notification contracts.
-// Browser-side mirror of the Python streaming_*.py /  subscribe_*.py
-// /  push_*.py modules.
+// Browser-side mirror of the Python streaming_*.py / subscribe_*.py
+// / push_*.py modules. Every probe goes through AgentProbe (the A2A
+// version the card advertises); SSE frames are unwrapped from their
+// JSON-RPC envelope and 0.3 events normalized to 1.0 StreamResponses.
 
+import {
+  pushDeleteParams,
+  pushGetParams,
+  pushListParams,
+  pushSetParams,
+  webhookTaskId,
+} from '../dialect';
 import type { Contract } from '../types';
 import {
-  callMethod,
-  fetchCardJson,
+  AgentProbe,
+  errorCode,
+  LONG_TASK_TEXT,
+  METHOD_NOT_FOUND_CODE,
+  UNSUPPORTED_OPERATION_CODE,
+} from './_probe';
+import {
   freshToken,
-  PUSH_RECEIVER_BASE,
+  getPushReceiverBase,
   pushSkipDetail,
   readReceivedHooks,
+  type SseEvent,
   SseFormatError,
   streamingSkipDetail,
-  streamSseEvents,
 } from './_streaming_helpers';
 import {
   looksLikeTask,
-  probeForTask,
   TASK_NOT_FOUND_CODE,
+  type TaskShape,
   TERMINAL_TASK_STATES,
   VALID_TASK_STATES,
 } from './_task_helpers';
@@ -29,96 +43,136 @@ function maybeAssert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(message);
 }
 
-// ---------------------------------------------------------------------------
-// Streaming SSE (§3.1.2, §4.1.6, §4.1.7)
-// ---------------------------------------------------------------------------
-
-async function probeStreamMessage(text: string) {
-  return {
-    message: {
-      messageId: `sse-probe-${Math.random().toString(36).slice(2, 10)}`,
-      role: 'user',
-      parts: [{ kind: 'text', text }],
-    },
-  };
+/** Probe + streaming capability gate shared by the SSE contracts. */
+async function streamingProbe(agentUrl: string): Promise<AgentProbe | string> {
+  const probe = await AgentProbe.create(agentUrl);
+  return streamingSkipDetail(probe.card) ?? probe;
 }
+
+async function streamSend(probe: AgentProbe, text: string): Promise<SseEvent[]> {
+  return probe.stream('stream', probe.sendParams(text));
+}
+
+// ---------------------------------------------------------------------------
+// Streaming SSE (§3.1.2, §4.1.6, §4.1.7, §9.4.2)
+// ---------------------------------------------------------------------------
 
 export const streamingResponseContentType: Contract = {
   id: 'transport.streaming_response_content_type',
   specSection: '§3.1.2',
-  description: 'message/stream returns Content-Type text/event-stream.',
+  description: 'SendStreamingMessage returns Content-Type text/event-stream.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const url = agentUrl.replace(/\/$/, '') + RPC_PATH;
-    const req = {
-      jsonrpc: '2.0',
-      id: 'stream-ctype',
-      method: 'message/stream',
-      params: await probeStreamMessage('count: 1 ctype'),
-    };
-    const res = await fetch(url, {
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const res = await fetch(agentUrl.replace(/\/$/, '') + RPC_PATH, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req),
+      headers: { 'content-type': 'application/json', ...probe.headers() },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'stream-ctype',
+        method: probe.method('stream'),
+        params: probe.sendParams('count: 1 ctype'),
+      }),
     });
     res.body?.cancel();
     const ctype = res.headers.get('content-type') ?? '';
     maybeAssert(
       ctype.toLowerCase().includes('text/event-stream'),
-      `message/stream MUST return text/event-stream; got ${ctype}`,
+      `${probe.method('stream')} MUST return text/event-stream; got ${ctype}`,
     );
+  },
+};
+
+export const streamingJsonrpcFraming: Contract = {
+  id: 'transport.streaming_jsonrpc_framing',
+  specSection: '§9.4.2',
+  description: 'Each SSE frame is a JSON-RPC response echoing the request id.',
+  category: 'transport',
+  async verify(agentUrl) {
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const requestId = 'sse-framing-probe';
+    const frames = await probe.streamFrames(
+      'stream',
+      probe.sendParams('count: 2 framing'),
+      requestId,
+    );
+    maybeAssert(frames.length > 0, `${probe.method('stream')} emitted no SSE events`);
+    const offenders: string[] = [];
+    frames.forEach((frame, i) => {
+      if (frame.jsonrpc !== '2.0') {
+        offenders.push(
+          `frame[${i}] is not a JSON-RPC 2.0 response (keys ${Object.keys(frame).sort()})`,
+        );
+        return;
+      }
+      if (frame.id !== requestId) {
+        offenders.push(`frame[${i}].id=${JSON.stringify(frame.id)} does not echo the request id`);
+      }
+      if ('result' in frame === 'error' in frame) {
+        offenders.push(`frame[${i}] must carry exactly one of result / error`);
+      }
+    });
+    maybeAssert(offenders.length === 0, offenders.slice(0, 5).join('; '));
   },
 };
 
 export const streamingFirstEventIsTask: Contract = {
   id: 'transport.streaming_first_event_is_task',
   specSection: '§3.1.2',
-  description: 'First SSE event of message/stream carries the Task envelope.',
+  description: 'First SSE event carries the Task (or the sole Message).',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 1 first-event'),
-    );
-    maybeAssert(events.length > 0, 'message/stream emitted no events');
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 1 first-event');
+    maybeAssert(events.length > 0, `${probe.method('stream')} emitted no events`);
     const first = events[0] ?? {};
-    const task = (first as { task?: unknown }).task;
-    maybeAssert(looksLikeTask(task), 'first SSE event MUST carry a `task` envelope');
+    if (first.message && typeof first.message === 'object') {
+      // Message-only stream (§3.1.2 pattern 1): exactly one Message.
+      maybeAssert(
+        events.length === 1,
+        `message-only stream MUST contain exactly one Message and then close; got ${events.length} events`,
+      );
+      return 'message-only stream (agent answered with a Message, not a Task)';
+    }
+    maybeAssert(
+      looksLikeTask(first.task),
+      'first SSE event MUST carry the Task (`{"task": {...}}`) or, for a message-only stream, the Message',
+    );
   },
 };
 
-const RECOGNIZED_KEYS = new Set(['task', 'statusUpdate', 'artifactUpdate']);
+const RECOGNIZED_KEYS = new Set(['task', 'message', 'statusUpdate', 'artifactUpdate']);
 
 export const streamingEventKinds: Contract = {
   id: 'transport.streaming_event_kinds',
   specSection: '§3.1.2',
-  description: 'SSE events carry task / statusUpdate / artifactUpdate.',
+  description:
+    'SSE events carry one StreamResponse member: task / message / statusUpdate / artifactUpdate.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 2 kinds'),
-    );
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 2 kinds');
+    maybeAssert(events.length > 0, `${probe.method('stream')} emitted no SSE events`);
     const offenders: string[] = [];
     events.forEach((ev, i) => {
-      const keys = new Set(Object.keys(ev));
-      const intersect = [...keys].filter((k) => RECOGNIZED_KEYS.has(k));
-      if (intersect.length === 0) {
-        offenders.push(`event[${i}] keys=${[...keys]}`);
+      if (!ev || typeof ev !== 'object') {
+        offenders.push(`event[${i}] is not an object`);
+        return;
+      }
+      if ('error' in ev) {
+        offenders.push(`event[${i}] is a JSON-RPC error: ${JSON.stringify(ev.error)}`);
+        return;
+      }
+      const keys = Object.keys(ev);
+      if (keys.filter((k) => RECOGNIZED_KEYS.has(k)).length !== 1) {
+        offenders.push(`event[${i}] keys=${keys}`);
       }
     });
-    maybeAssert(offenders.length === 0, `events with no recognized kind: ${offenders.join('; ')}`);
+    maybeAssert(offenders.length === 0, `events without exactly one kind: ${offenders.join('; ')}`);
   },
 };
 
@@ -128,14 +182,9 @@ export const streamingStatusUpdateShape: Contract = {
   description: 'TaskStatusUpdateEvent carries taskId + status{state, timestamp}.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 1 status-shape'),
-    );
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 1 status-shape');
     events.forEach((ev, i) => {
       if (!('statusUpdate' in ev)) return;
       const su = ev.statusUpdate as Record<string, unknown>;
@@ -172,14 +221,9 @@ export const streamingArtifactUpdateShape: Contract = {
   description: 'TaskArtifactUpdateEvent carries taskId + Artifact.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 2 artifacts'),
-    );
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 2 artifacts');
     let seen = 0;
     events.forEach((ev, i) => {
       if (!('artifactUpdate' in ev)) return;
@@ -220,16 +264,12 @@ export const streamingTaskIdConsistency: Contract = {
   description: 'All SSE events in one stream reference the same taskId.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 2 id-consistency'),
-    );
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 2 id-consistency');
     maybeAssert(events.length > 0, 'no events streamed');
     const first = events[0] ?? {};
+    if ('message' in first) return 'skipped — message-only stream; no task id to keep consistent';
     const taskId = ((first as { task?: { id?: unknown } }).task?.id ?? null) as string | null;
     maybeAssert(typeof taskId === 'string' && taskId, 'first event must carry task.id');
     const offenders: string[] = [];
@@ -239,10 +279,9 @@ export const streamingTaskIdConsistency: Contract = {
         (ev.artifactUpdate as Record<string, unknown>) ??
         null;
       if (!payload) return;
-      const seen = payload.taskId;
-      if (seen !== taskId) {
+      if (payload.taskId !== taskId) {
         offenders.push(
-          `event[${i + 1}].taskId=${JSON.stringify(seen)} ≠ initial ${JSON.stringify(taskId)}`,
+          `event[${i + 1}].taskId=${JSON.stringify(payload.taskId)} ≠ initial ${JSON.stringify(taskId)}`,
         );
       }
     });
@@ -256,15 +295,13 @@ export const streamingTerminalStateCloses: Contract = {
   description: 'SSE stream closes after a terminal-state statusUpdate.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const events = await streamSseEvents(
-      agentUrl,
-      'message/stream',
-      await probeStreamMessage('count: 1 terminal'),
-    );
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const events = await streamSend(probe, 'count: 1 terminal');
     maybeAssert(events.length > 0, 'no events streamed');
+    if ('message' in (events[0] ?? {})) {
+      return 'skipped — message-only stream; no task lifecycle to close';
+    }
     let lastStatusIndex = -1;
     let lastState: string | null = null;
     events.forEach((ev, i) => {
@@ -289,95 +326,116 @@ export const streamingTerminalStateCloses: Contract = {
 // Subscribe-to-task (§3.1.6)
 // ---------------------------------------------------------------------------
 
+/** SubscribeToTask only applies to running tasks (terminal → -32004),
+ *  so seed one that returns immediately and keeps working. */
+async function runningTask(probe: AgentProbe): Promise<TaskShape | string> {
+  const seed = await probe.sendForTask({ text: LONG_TASK_TEXT, blocking: false });
+  if (!seed) return 'skipped — agent did not return a Task to subscribe to';
+  if (TERMINAL_TASK_STATES.has(seed.status.state)) {
+    return 'skipped — task was already terminal when the send returned; nothing to subscribe to';
+  }
+  return seed;
+}
+
 export const subscribeReturnsStream: Contract = {
   id: 'transport.subscribe_returns_stream',
   specSection: '§3.1.6',
-  description: 'tasks/resubscribe returns Content-Type text/event-stream.',
+  description: 'SubscribeToTask returns Content-Type text/event-stream.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
-    const url = agentUrl.replace(/\/$/, '') + RPC_PATH;
-    const res = await fetch(url, {
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const seed = await runningTask(probe);
+    if (typeof seed === 'string') return seed;
+    const res = await fetch(agentUrl.replace(/\/$/, '') + RPC_PATH, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...probe.headers() },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 'resub-ctype',
-        method: 'tasks/resubscribe',
+        method: probe.method('subscribe'),
         params: { id: seed.id },
       }),
     });
-    res.body?.cancel();
-    const ctype = res.headers.get('content-type') ?? '';
-    if (ctype.toLowerCase().includes('text/event-stream')) return;
-    if (ctype.toLowerCase().includes('application/json')) {
-      return `tasks/resubscribe returned application/json, not text/event-stream; spec mandates SSE`;
+    const ctype = (res.headers.get('content-type') ?? '').toLowerCase();
+    if (ctype.includes('text/event-stream')) {
+      res.body?.cancel();
+      return;
     }
-    throw new Error(`tasks/resubscribe returned unexpected content-type ${ctype}`);
+    const raw = await res.text().catch(() => '');
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      /* not JSON */
+    }
+    if (errorCode(parsed) === UNSUPPORTED_OPERATION_CODE) {
+      return 'skipped — task finished before the subscription was opened';
+    }
+    if (ctype.includes('application/json')) {
+      return `${probe.method('subscribe')} returned application/json, not text/event-stream; spec mandates SSE`;
+    }
+    throw new Error(`${probe.method('subscribe')} returned unexpected content-type ${ctype}`);
   },
 };
 
 export const subscribeReplaysState: Contract = {
   id: 'transport.subscribe_replays_state',
   specSection: '§3.1.6',
-  description: 'tasks/resubscribe first event reflects the subscribed task state.',
+  description: "SubscribeToTask first event reflects the subscribed task's state.",
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
-    let events;
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const seed = await runningTask(probe);
+    if (typeof seed === 'string') return seed;
+    let events: SseEvent[];
     try {
-      events = await streamSseEvents(agentUrl, 'tasks/resubscribe', { id: seed.id });
+      events = await probe.stream('subscribe', { id: seed.id });
     } catch (err) {
       if (err instanceof SseFormatError) {
-        return 'skipped — tasks/resubscribe did not return SSE';
+        return err.errorCode === UNSUPPORTED_OPERATION_CODE
+          ? 'skipped — task finished before the subscription was opened'
+          : `skipped — ${probe.method('subscribe')} did not return SSE`;
       }
       throw err;
     }
-    maybeAssert(events.length > 0, 'no events from tasks/resubscribe');
+    maybeAssert(events.length > 0, `no events from ${probe.method('subscribe')}`);
     const first = events[0] ?? {};
-    const taskEnv = first.task as Record<string, unknown> | undefined;
-    if (looksLikeTask(taskEnv)) {
-      maybeAssert(
-        (taskEnv as { id: string }).id === seed.id,
-        `first event task.id ≠ subscribed id`,
-      );
+    if (looksLikeTask(first.task)) {
+      maybeAssert(first.task.id === seed.id, 'first event task.id ≠ subscribed id');
       return;
     }
+    // 1.0 §3.1.6: "The operation MUST return a Task object as the first
+    // event"; 0.3 agents could lead with a status update.
     const su = first.statusUpdate as Record<string, unknown> | undefined;
-    if (su) {
+    if (su && probe.isLegacy) {
       maybeAssert(su.taskId === seed.id, 'first statusUpdate.taskId ≠ subscribed id');
       return;
     }
-    throw new Error(`first tasks/resubscribe event carries neither task nor statusUpdate`);
+    throw new Error(`first ${probe.method('subscribe')} event MUST carry the Task (§3.1.6)`);
   },
 };
 
 export const subscribeNotFound: Contract = {
   id: 'transport.subscribe_not_found',
   specSection: '§3.1.6',
-  description: 'tasks/resubscribe on unknown id returns TaskNotFoundError.',
+  description: 'SubscribeToTask on unknown id returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = streamingSkipDetail(card);
-    if (skip) return skip;
-    const env = await callMethod(agentUrl, 'tasks/resubscribe', {
-      id: crypto.randomUUID(),
-    });
+    const probe = await streamingProbe(agentUrl);
+    if (typeof probe === 'string') return probe;
+    const env = await probe.call('subscribe', { id: crypto.randomUUID() });
     const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement tasks/resubscribe (-32601)';
+    if (errorCode(env) === METHOD_NOT_FOUND_CODE) {
+      return `skipped — agent does not implement ${probe.method('subscribe')} (-32601)`;
     }
+    maybeAssert(
+      Object.keys(env).length > 0,
+      `${probe.method('subscribe')} for a bogus id did not return a JSON-RPC error envelope`,
+    );
     if ('result' in env && !error) {
-      throw new Error('tasks/resubscribe returned a result for bogus id');
+      throw new Error(`${probe.method('subscribe')} returned a result for bogus id`);
     }
     const code = error?.code;
     if (code === TASK_NOT_FOUND_CODE) return;
@@ -388,23 +446,22 @@ export const subscribeNotFound: Contract = {
 export const subscribeCapabilityRequired: Contract = {
   id: 'transport.subscribe_capability_required',
   specSection: '§3.1.6',
-  description: 'tasks/resubscribe returns -32004 when streaming=false.',
+  description: 'SubscribeToTask returns -32004 when streaming=false.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const caps = card.capabilities as Record<string, unknown> | undefined;
-    if (caps?.streaming === true) {
+    const probe = await AgentProbe.create(agentUrl);
+    if (probe.capability('streaming') === true) {
       return 'skipped — agent advertises streaming=true (positive case)';
     }
-    const env = await callMethod(agentUrl, 'tasks/resubscribe', {
-      id: crypto.randomUUID(),
-    });
+    const env = await probe.call('subscribe', { id: crypto.randomUUID() });
     if ('result' in env && !env.error) {
-      throw new Error('agent advertises streaming=false but tasks/resubscribe returned a result');
+      throw new Error(
+        `agent advertises streaming=false but ${probe.method('subscribe')} returned a result`,
+      );
     }
-    const error = (env.error ?? {}) as Record<string, unknown>;
-    if (error.code === -32004) return;
-    return `capability honored — agent refused but with code ${error.code}; spec mandates -32004`;
+    const code = errorCode(env);
+    if (code === UNSUPPORTED_OPERATION_CODE) return;
+    return `capability honored — agent refused but with code ${code}; spec mandates -32004`;
   },
 };
 
@@ -412,94 +469,84 @@ export const subscribeCapabilityRequired: Contract = {
 // Push notifications (§3.1.7–§3.1.10, §3.5)
 // ---------------------------------------------------------------------------
 
-async function setPushConfig(
+/** Probe + push capability gate + a Task to attach configs to. */
+async function pushSeed(
   agentUrl: string,
+): Promise<{ probe: AgentProbe; seed: TaskShape } | string> {
+  const probe = await AgentProbe.create(agentUrl);
+  const skip = pushSkipDetail(probe.card);
+  if (skip) return skip;
+  const seed = await probe.sendForTask();
+  if (!seed) return 'skipped — agent did not return a Task';
+  return { probe, seed };
+}
+
+function notImplemented(
+  probe: AgentProbe,
+  env: Record<string, unknown>,
+  op: 'push_set' | 'push_get' | 'push_list' | 'push_delete',
+): string | null {
+  return errorCode(env) === METHOD_NOT_FOUND_CODE
+    ? `skipped — agent does not implement ${probe.method(op)} (-32601)`
+    : null;
+}
+
+async function setPushConfig(
+  probe: AgentProbe,
   taskId: string,
   url: string,
-): Promise<{ id: string | null; skipped: string | null }> {
-  const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
-    taskId,
-    pushNotificationConfig: { url },
-  });
-  const error = env.error as Record<string, unknown> | undefined;
-  if (error?.code === -32601) {
-    return {
-      id: null,
-      skipped: 'skipped — agent does not implement pushNotificationConfig/set',
-    };
-  }
-  const cfg = ((env.result as Record<string, unknown>)?.pushNotificationConfig ?? null) as Record<
-    string,
-    unknown
-  > | null;
-  return { id: typeof cfg?.id === 'string' ? cfg.id : null, skipped: null };
+): Promise<{ id: string | null; skipped: string | null; cfg: Record<string, unknown> | null }> {
+  const env = await probe.call('push_set', pushSetParams(probe.dialect, taskId, url));
+  const skipped = notImplemented(probe, env, 'push_set');
+  if (skipped) return { id: null, skipped, cfg: null };
+  const cfg = probe.pushConfigOf(env.result);
+  return { id: typeof cfg?.id === 'string' ? cfg.id : null, skipped: null, cfg };
+}
+
+function listedIds(configs: Array<Record<string, unknown>> | null): Set<string> {
+  return new Set(
+    (configs ?? []).map((c) => c?.id).filter((id): id is string => typeof id === 'string'),
+  );
 }
 
 export const pushSetPersists: Contract = {
   id: 'transport.push_set_persists',
   specSection: '§3.1.7',
-  description: 'pushNotificationConfig/set returns the stored config with id.',
+  description: 'CreateTaskPushNotificationConfig returns the stored config with id.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
+    const ctx = await pushSeed(agentUrl);
+    if (typeof ctx === 'string') return ctx;
     const url = `https://example.invalid/wh/${crypto.randomUUID()}`;
-    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
-      taskId: seed.id,
-      pushNotificationConfig: { url },
-    });
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/set';
-    }
-    const result = env.result as Record<string, unknown> | undefined;
-    maybeAssert(typeof result === 'object' && result !== null, 'set MUST return result object');
-    const cfg = (result as { pushNotificationConfig?: unknown }).pushNotificationConfig as
-      | Record<string, unknown>
-      | undefined;
+    const set = await setPushConfig(ctx.probe, ctx.seed.id, url);
+    if (set.skipped) return set.skipped;
+    maybeAssert(set.cfg, `${ctx.probe.method('push_set')} MUST return a result object`);
     maybeAssert(
-      typeof cfg === 'object' && cfg !== null,
-      'result.pushNotificationConfig MUST be present',
+      set.cfg.url === url,
+      `set returned url ${JSON.stringify(set.cfg.url)}; expected ${JSON.stringify(url)}`,
     );
-    maybeAssert(
-      cfg.url === url,
-      `set returned url ${JSON.stringify(cfg.url)}; expected ${JSON.stringify(url)}`,
-    );
-    maybeAssert(typeof cfg.id === 'string' && cfg.id, 'config id MUST be assigned');
+    maybeAssert(set.id, 'config id MUST be assigned');
   },
 };
 
 export const pushGetReturnsConfig: Contract = {
   id: 'transport.push_get_returns_config',
   specSection: '§3.1.8',
-  description: 'pushNotificationConfig/get retrieves the stored config.',
+  description: 'GetTaskPushNotificationConfig retrieves the stored config.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
+    const ctx = await pushSeed(agentUrl);
+    if (typeof ctx === 'string') return ctx;
+    const { probe, seed } = ctx;
     const url = `https://example.invalid/wh/${crypto.randomUUID()}`;
-    const set = await setPushConfig(agentUrl, seed.id, url);
+    const set = await setPushConfig(probe, seed.id, url);
     if (set.skipped) return set.skipped;
     if (!set.id) throw new Error('set did not return a config id');
-    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/get', {
-      taskId: seed.id,
-      pushNotificationConfigId: set.id,
-    });
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/get';
-    }
-    const cfg = ((env.result as Record<string, unknown>)?.pushNotificationConfig ?? null) as Record<
-      string,
-      unknown
-    > | null;
-    maybeAssert(typeof cfg === 'object' && cfg !== null, 'get MUST return pushNotificationConfig');
+    const env = await probe.call('push_get', pushGetParams(probe.dialect, seed.id, set.id));
+    const skipped = notImplemented(probe, env, 'push_get');
+    if (skipped) return skipped;
+    const cfg = probe.pushConfigOf(env.result);
+    maybeAssert(cfg, 'get MUST return the push notification config');
     maybeAssert(
       cfg.id === set.id,
       `get id ${JSON.stringify(cfg.id)} ≠ stored ${JSON.stringify(set.id)}`,
@@ -514,18 +561,16 @@ export const pushGetReturnsConfig: Contract = {
 export const pushListReturnsAll: Contract = {
   id: 'transport.push_list_returns_all',
   specSection: '§3.1.9',
-  description: 'pushNotificationConfig/list returns every stored config.',
+  description: 'ListTaskPushNotificationConfigs returns every stored config.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
+    const ctx = await pushSeed(agentUrl);
+    if (typeof ctx === 'string') return ctx;
+    const { probe, seed } = ctx;
     const ids: string[] = [];
     for (let i = 0; i < 2; i++) {
       const set = await setPushConfig(
-        agentUrl,
+        probe,
         seed.id,
         `https://example.invalid/wh/${crypto.randomUUID()}-${i}`,
       );
@@ -533,23 +578,15 @@ export const pushListReturnsAll: Contract = {
       if (!set.id) throw new Error('set did not return id');
       ids.push(set.id);
     }
-    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/list', {
-      taskId: seed.id,
-    });
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/list';
-    }
-    const result = env.result as Record<string, unknown>;
-    const configs =
-      (result?.pushNotificationConfigs as unknown[] | undefined) ??
-      (result?.configs as unknown[] | undefined) ??
-      [];
-    const listed = new Set(
-      configs
-        .map((c) => (c as { id?: unknown })?.id)
-        .filter((id): id is string => typeof id === 'string'),
+    const env = await probe.call('push_list', pushListParams(probe.dialect, seed.id));
+    const skipped = notImplemented(probe, env, 'push_list');
+    if (skipped) return skipped;
+    const configs = probe.pushConfigListOf(env.result);
+    maybeAssert(
+      configs,
+      `${probe.method('push_list')} MUST return the configs array (1.0: result.configs; 0.3: a bare array)`,
     );
+    const listed = listedIds(configs);
     for (const id of ids) {
       maybeAssert(listed.has(id), `list omitted previously-set config ${id}`);
     }
@@ -559,150 +596,91 @@ export const pushListReturnsAll: Contract = {
 export const pushDeleteRemoves: Contract = {
   id: 'transport.push_delete_removes',
   specSection: '§3.1.10',
-  description: 'pushNotificationConfig/delete removes the config from list.',
+  description: 'DeleteTaskPushNotificationConfig removes the config from list.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const seed = await probeForTask(agentUrl);
-    if (!seed) return 'skipped — agent did not return a Task';
+    const ctx = await pushSeed(agentUrl);
+    if (typeof ctx === 'string') return ctx;
+    const { probe, seed } = ctx;
     const set = await setPushConfig(
-      agentUrl,
+      probe,
       seed.id,
       `https://example.invalid/wh/${crypto.randomUUID()}`,
     );
     if (set.skipped) return set.skipped;
     if (!set.id) throw new Error('set did not return id');
-    const del = await callMethod(agentUrl, 'tasks/pushNotificationConfig/delete', {
-      taskId: seed.id,
-      pushNotificationConfigId: set.id,
-    });
-    const error = del.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/delete';
-    }
-    const list = await callMethod(agentUrl, 'tasks/pushNotificationConfig/list', {
-      taskId: seed.id,
-    });
-    const listError = list.error as Record<string, unknown> | undefined;
-    if (listError?.code === -32601) return;
-    const result = list.result as Record<string, unknown>;
-    const configs =
-      (result?.pushNotificationConfigs as unknown[] | undefined) ??
-      (result?.configs as unknown[] | undefined) ??
-      [];
-    const listed = new Set(
-      configs
-        .map((c) => (c as { id?: unknown })?.id)
-        .filter((id): id is string => typeof id === 'string'),
+    const del = await probe.call('push_delete', pushDeleteParams(probe.dialect, seed.id, set.id));
+    const skipped = notImplemented(probe, del, 'push_delete');
+    if (skipped) return skipped;
+    maybeAssert(!del.error, `${probe.method('push_delete')} failed: ${JSON.stringify(del.error)}`);
+    const list = await probe.call('push_list', pushListParams(probe.dialect, seed.id));
+    if (errorCode(list) === METHOD_NOT_FOUND_CODE) return;
+    maybeAssert(
+      !listedIds(probe.pushConfigListOf(list.result)).has(set.id),
+      `deleted config ${set.id} still in list response`,
     );
-    maybeAssert(!listed.has(set.id), `deleted config ${set.id} still in list response`);
   },
 };
+
+async function expectPushTaskNotFound(
+  agentUrl: string,
+  op: 'push_set' | 'push_get',
+): Promise<undefined | string> {
+  const probe = await AgentProbe.create(agentUrl);
+  const skip = pushSkipDetail(probe.card);
+  if (skip) return skip;
+  const bogus = crypto.randomUUID();
+  const params =
+    op === 'push_set'
+      ? pushSetParams(probe.dialect, bogus, 'https://example.invalid/wh')
+      : pushGetParams(probe.dialect, bogus, crypto.randomUUID());
+  const env = await probe.call(op, params);
+  const skipped = notImplemented(probe, env, op);
+  if (skipped) return skipped;
+  const error = env.error as Record<string, unknown> | undefined;
+  if ('result' in env && !error) {
+    throw new Error(`${probe.method(op)} returned a result for bogus taskId`);
+  }
+  if (error?.code === TASK_NOT_FOUND_CODE) return;
+  return `agent rejected unknown taskId (good) but with code ${error?.code}; spec mandates ${TASK_NOT_FOUND_CODE}`;
+}
 
 export const pushSetTaskNotFound: Contract = {
   id: 'transport.push_set_task_not_found',
   specSection: '§3.1.7',
-  description: 'pushNotificationConfig/set on unknown taskId returns TaskNotFoundError.',
+  description: 'CreateTaskPushNotificationConfig on unknown taskId returns TaskNotFoundError.',
   category: 'transport',
-  async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
-      taskId: crypto.randomUUID(),
-      pushNotificationConfig: { url: 'https://example.invalid/wh' },
-    });
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/set';
-    }
-    if ('result' in env && !error) {
-      throw new Error('set returned a result for bogus taskId');
-    }
-    if (error?.code === TASK_NOT_FOUND_CODE) return;
-    return `agent rejected unknown taskId (good) but with code ${error?.code}; spec mandates ${TASK_NOT_FOUND_CODE}`;
-  },
+  verify: (agentUrl) => expectPushTaskNotFound(agentUrl, 'push_set'),
 };
 
 export const pushGetTaskNotFound: Contract = {
   id: 'transport.push_get_task_not_found',
   specSection: '§3.1.8',
-  description: 'pushNotificationConfig/get on unknown taskId returns TaskNotFoundError.',
+  description: 'GetTaskPushNotificationConfig on unknown taskId returns TaskNotFoundError.',
   category: 'transport',
-  async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
-    if (skip) return skip;
-    const env = await callMethod(agentUrl, 'tasks/pushNotificationConfig/get', {
-      taskId: crypto.randomUUID(),
-      pushNotificationConfigId: crypto.randomUUID(),
-    });
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/get';
-    }
-    if ('result' in env && !error) {
-      throw new Error('get returned a result for bogus taskId');
-    }
-    if (error?.code === TASK_NOT_FOUND_CODE) return;
-    return `agent rejected unknown taskId (good) but with code ${error?.code}; spec mandates ${TASK_NOT_FOUND_CODE}`;
-  },
+  verify: (agentUrl) => expectPushTaskNotFound(agentUrl, 'push_get'),
 };
 
 export const pushFiresOnCompletion: Contract = {
   id: 'transport.push_fires_on_completion',
   specSection: '§3.5',
-  description: 'Agent POSTs the Task to a registered push URL on completion.',
+  description: 'Agent POSTs a task update to a registered push URL on completion.',
   category: 'transport',
   async verify(agentUrl) {
-    const card = await fetchCardJson(agentUrl);
-    const skip = pushSkipDetail(card);
+    const probe = await AgentProbe.create(agentUrl);
+    const skip = pushSkipDetail(probe.card);
     if (skip) return skip;
     const token = freshToken();
-    const webhook = `${PUSH_RECEIVER_BASE}/webhook/${token}`;
-    // blocking=false so the agent returns before the task completes
+    const webhook = `${getPushReceiverBase()}/webhook/${token}`;
+    // Non-blocking send so the agent returns before the task completes
     // and we have time to register the push config.
-    const task = await probeForTask(agentUrl, { text: 'count: 8' });
-    if (!task) return 'skipped — agent did not return a Task';
-    if (TERMINAL_TASK_STATES.has(task.status.state)) {
-      return 'skipped — agent ignored blocking semantics; task already terminal';
+    const fresh = await probe.sendForTask({ text: 'count: 8 push', blocking: false });
+    if (!fresh) return 'skipped — agent did not return a Task for a non-blocking send';
+    if (TERMINAL_TASK_STATES.has(fresh.status.state)) {
+      return 'skipped — agent ignored the non-blocking request (task already terminal)';
     }
-    // Use raw JSON-RPC call for blocking=false since probeForTask
-    // doesn't take that option in the TS port.
-    const url = agentUrl.replace(/\/$/, '') + RPC_PATH;
-    const sendRes = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'pfc-send',
-        method: 'message/send',
-        params: {
-          message: {
-            messageId: `pfc-${crypto.randomUUID()}`,
-            role: 'user',
-            parts: [{ kind: 'text', text: 'count: 8 push' }],
-          },
-          configuration: { blocking: false },
-        },
-      }),
-    });
-    const sendBody = (await sendRes.json()) as Record<string, unknown>;
-    const fresh = sendBody.result as { id?: string; status?: { state?: string } } | undefined;
-    if (!fresh?.id) return 'skipped — message/send did not return Task';
-    if (fresh.status && TERMINAL_TASK_STATES.has(fresh.status.state ?? '')) {
-      return 'skipped — agent ignored blocking=false (task already terminal)';
-    }
-    const set = await callMethod(agentUrl, 'tasks/pushNotificationConfig/set', {
-      taskId: fresh.id,
-      pushNotificationConfig: { url: webhook },
-    });
-    const setError = set.error as Record<string, unknown> | undefined;
-    if (setError?.code === -32601) {
-      return 'skipped — agent does not implement pushNotificationConfig/set';
-    }
+    const set = await setPushConfig(probe, fresh.id, webhook);
+    if (set.skipped) return set.skipped;
     // Poll the receiver up to 5s.
     const deadline = Date.now() + 5000;
     let hooks: Array<Record<string, unknown>> = [];
@@ -717,13 +695,14 @@ export const pushFiresOnCompletion: Contract = {
     );
     const first = hooks[0] ?? {};
     const body = typeof first.body === 'string' ? first.body : '';
-    let payload: { id?: unknown } | null = null;
+    let payload: unknown = null;
     try {
-      payload = JSON.parse(body) as { id?: unknown };
+      payload = JSON.parse(body);
     } catch {
       payload = null;
     }
-    if (payload?.id !== fresh.id) {
+    // 1.0 posts a StreamResponse (§4.3.3); 0.3 posted the bare Task.
+    if (webhookTaskId(probe.dialect, payload) !== fresh.id) {
       return `webhook delivered but payload didn't carry the task id`;
     }
   },

@@ -63,9 +63,12 @@ pip install -e ".[test]"
 # 1. Run the bundled three-party guardian-mediated consent scenario
 a2a-testbed run examples/scenarios/three_party_consent.yaml
 
-# 2. Run a live A2A 1.0 transport-contract sweep against any deployed
-#    agent. 58 spec-derived contracts; cites the spec section for
+# 2. Run a live A2A transport-contract sweep against any deployed
+#    agent. 62 spec-derived contracts; cites the spec section for
 #    each row. Use for your own Cloudflare/Lambda/GKE deployments.
+#    Probes in the version the agent's card advertises (1.0, or 0.3
+#    for legacy cards); --protocol-version 0.3 sweeps the legacy
+#    surface of an agent that serves both.
 a2a-testbed conformance https://my-agent.example.com
 
 # 3. Run a multi-agent scenario AND probe its `runtime: external`
@@ -190,7 +193,7 @@ a2a-testbed/
 │   ├── runtimes/        (python_inproc, python_subproc, go, nodejs, java, external)
 │   ├── network/         (multitenant — sim mode; perprocess — realistic mode)
 │   ├── transport/       (Transport protocol abstraction + A2ATransport)
-│   ├── contracts/       (61 spec-derived A2A 1.0 conformance contracts: 58 transport + 3 network + runner)
+│   ├── contracts/       (65 spec-derived A2A conformance contracts: 62 transport + 3 network + runner)
 │   ├── manifest/        (ExtensionManifest types, generator, store, validator)
 │   ├── extensions/      (MCP delegation glue for richer semantic validation)
 │   ├── vendors/         (AgentCard dialect framework + A2A native checker)
@@ -243,6 +246,20 @@ can't tell it's being faulted from the wire.
 **Time controller.** Per-scenario virtual clock with explicit
 `advance(seconds)`. Required for testing protocol TTLs and refresh
 cadences without sleeping in the test.
+
+**Protocol version.** The testbed speaks A2A 1.0 (`SendMessage`,
+`A2A-Version: 1.0`, ProtoJSON payloads) and stays backward compatible
+with A2A 0.3. As a client it negotiates per agent from the AgentCard —
+1.0 unless the card is a 0.3 card or lists only 0.x JSONRPC interfaces
+— and normalizes 0.3 payloads to the 1.0 shape before any contract
+runs, skipping only rules that 1.0 introduced. As a server, every
+testbed-hosted agent (in-process agents and the Python / Go / Node /
+Java templates) answers 1.0 *and* 0.3 callers in their own wire format,
+like the a2a-sdk's `enable_v0_3_compat`; an agent declared with a 0.3
+card behaves like a pre-1.0 deployment (0.3 card layout, 0.3 methods
+only). `examples/scenarios/mixed_versions.yaml` runs both side by side.
+The contract suite is validated against agents built on the official
+a2a-sdk in both versions (`tests/oracles/`).
 
 **Observer.** An agent declared with `role: observer`. The runner
 records every step against the observer's history; a semantic
@@ -324,7 +341,8 @@ Bundled under `examples/scenarios/`:
 | `observer_audit.yaml` | Observer agent receives every wire exchange via traffic taps |
 | `polyglot_smoke.yaml` | Polyglot architecture demo (in-process Python; subprocess scenarios in `tests/polyglot/`) |
 | `cloudflare_math_demo.yaml` | Live LLM-backed math agent on Cloudflare Workers (Llama 3.3 via Groq, JSON mode); semantic field-level assertions |
-| `task_runner_demo.yaml` | Live A2A 1.0 task-runner agent at `tasks.a2a-testbed.com`; full Tasks / SSE / push lifecycle, pairs with `--probe-external` for the contract sweep |
+| `task_runner_demo.yaml` | Live task-runner agent at `tasks.a2a-testbed.com` (A2A 1.0 + 0.3); full Tasks / SSE / push lifecycle, pairs with `--probe-external` for the contract sweep |
+| `mixed_versions.yaml` | An A2A 1.0 agent and an A2A 0.3 agent exchanging requests both ways; the testbed speaks each receiver's own version |
 | `three_party_governed.yaml` | The three-party flow with an ACS manifest attached (`acs:` field); per-step governance verdicts |
 | `cloudflare_math_governed.yaml` | ACS runtime governance against the **live** Cloudflare math agent: DLP on the real request, error-check on the real response |
 
@@ -367,7 +385,8 @@ toolchains are exercised in `tests/polyglot/`.
 | [a2aproject/a2a-samples](https://github.com/a2aproject/a2a-samples) | Reference sample agents in Python, JavaScript, Go, Java. |
 | [A2A-StoryLab](https://github.com/A2A-StoryLab/A2A-StoryLab) | Educational multi-agent demo (Orchestrator + Creator + Critic). |
 
-a2a-testbed targets A2A 1.0 and adds: multi-agent scenarios,
+a2a-testbed targets A2A 1.0 (pinned to the v1.0.1 spec release),
+stays compatible with A2A 0.3 agents, and adds: multi-agent scenarios,
 network fault injection, virtual time, the extension manifest
 convention, and a hosted browser playground at
 <https://a2a-testbed.com>.
@@ -385,8 +404,8 @@ uv venv && source .venv/bin/activate && uv pip install -e .
 ```
 
 Some tests will fail because TCK enforces A2A v0.3.0 mandatory
-surfaces (notably `tasks/list` pagination + filtering and
-multi-transport equivalence) that this agent does not implement.
+surfaces (notably multi-transport equivalence) that this
+JSON-RPC-only agent does not implement.
 
 ## Contributing
 

@@ -43,7 +43,6 @@ from a2a_testbed.runtimes import (
 )
 from a2a_testbed.transport import A2ATransport, Transport
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -176,31 +175,13 @@ class _SingleAgentServer:
                     self._transport.build_error_response({}, -32700, "parse error"),
                     status_code=400,
                 )
-            method = body.get("method") if isinstance(body, dict) else None
-            if method != "message/send":
-                error_payload = self._transport.build_error_response(
-                    body, -32601, f"method not implemented: {method!r}"
-                )
-                return JSONResponse(error_payload)
-            params = body.get("params") if isinstance(body, dict) else None
-            message = params.get("message") if isinstance(params, dict) else None
-            valid = (
-                isinstance(message, dict)
-                and message.get("role")
-                and message.get("messageId")
-                and isinstance(message.get("parts"), list)
-                and len(message["parts"]) > 0
+            response_body = self._transport.handle_rpc(
+                body,
+                request.headers,
+                self._runtime.agent_card,
+                self._runtime.script_for,
+                self._runtime.agent_id,
             )
-            if not valid:
-                error_payload = self._transport.build_error_response(
-                    body,
-                    -32602,
-                    "invalid params: message MUST have role, messageId, and ≥1 part (A2A 1.0 §3.1.1)",
-                )
-                return JSONResponse(error_payload)
-            text = self._transport.extract_text_for_scripting(body)
-            scripted = self._runtime.script_for(text)
-            response_body = self._transport.build_response(body, self._runtime.agent_id, scripted)
             for tap in self._traffic_taps:
                 try:
                     tap(self._runtime.agent_id, body, response_body)

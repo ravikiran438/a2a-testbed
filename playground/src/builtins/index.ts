@@ -59,11 +59,11 @@ export const BUILTIN_SCENARIOS: BuiltinScenarioDef[] = [
     id: 'task-runner',
     label: 'Task runner agent (live A2A lifecycle)',
     description:
-      'A reference A2A 1.0 agent exercising the full task surface — ' +
-      'Tasks via message/send, SSE streaming via message/stream, ' +
-      'tasks/get/list/cancel, tasks/resubscribe, and push ' +
-      'notifications. The playground runs a 58-contract conformance ' +
-      'sweep against it on every Run.',
+      'A reference A2A 1.0 agent (also serving A2A 0.3) exercising the ' +
+      'full task surface — SendMessage, SSE streaming via ' +
+      'SendStreamingMessage, GetTask / ListTasks / CancelTask, ' +
+      'SubscribeToTask, and push notifications. The playground runs a ' +
+      '62-contract conformance sweep against it on every Run.',
     yaml: taskRunnerYaml,
     cards: {
       'prober.json': taskRunnerProberCard,

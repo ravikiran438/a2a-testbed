@@ -1,10 +1,27 @@
 /**
- * A2A 1.0 reference task runner.
+ * A2A reference task runner (A2A 1.0, with A2A 0.3 compatibility).
  *
- * Implements every Task / GetTask / ListTasks / CancelTask /
- * SubscribeToTask / PushNotificationConfig method the A2A spec
- * defines, against an in-memory work simulator. Tasks "do work"
- * by emitting N status updates spaced 50ms apart; the input text
+ * Implements every A2A 1.0 JSON-RPC method (SendMessage,
+ * SendStreamingMessage, GetTask, ListTasks, CancelTask,
+ * SubscribeToTask, {Create,Get,List,Delete}TaskPushNotificationConfig,
+ * GetExtendedAgentCard) with the 1.0 ProtoJSON payload shapes, so the
+ * official a2a-sdk 1.x clients interoperate unmodified.
+ *
+ * The same endpoint also serves A2A 0.3 clients (`message/send`,
+ * `tasks/get`, ...) with 0.3 payloads (`kind` discriminators,
+ * lower-case task states, bare Task results), the same arrangement as
+ * the a2a-sdk server's `enable_v0_3_compat`. The AgentCard advertises
+ * both: a 1.0 JSONRPC interface first (preferred) and a 0.3 one on the
+ * same URL (A2A 1.0 §3.6.2: "Agents CAN expose multiple interfaces for
+ * the same transport with different versions under the same or
+ * different URLs").
+ *
+ * Version negotiation follows A2A 1.0 §3.6.2: a 1.0 method must carry
+ * `A2A-Version: 1.x` (an absent header means 0.3), and any request
+ * for a version this agent does not serve gets VersionNotSupportedError.
+ *
+ * Tasks run against an in-memory work simulator. Tasks "do work"
+ * by emitting N artifact updates spaced 50ms apart; the input text
  * may carry a leading integer to choose N (default 5, capped at
  * MAX_WORK_UNITS).
  *
@@ -12,7 +29,9 @@
  * every task + push config. Routing all requests to one DO keeps
  * the access pattern serialized and avoids KV's daily write cap —
  * DO storage has no per-day cap; only per-instance request rate
- * limits (effectively unbounded for a demo at this scale).
+ * limits (effectively unbounded for a demo at this scale). The stored
+ * shape is version-neutral and rendered per request, so tasks created
+ * by either protocol version are visible to both.
  */
 
 interface Env {
@@ -22,6 +41,11 @@ interface Env {
   };
   MAX_WORK_UNITS: string;
 }
+
+// --------------------------------------------------------------------------
+// Stored (version-neutral) shapes. Kept identical to what earlier
+// releases persisted so existing Durable Object data stays readable.
+// --------------------------------------------------------------------------
 
 interface MessagePart {
   kind: "text";
@@ -81,6 +105,9 @@ interface PushNotificationConfig {
     schemes: string[];
     credentials?: string;
   };
+  /** Protocol version the config was registered with; decides the
+   *  webhook payload shape. Absent on configs stored before 1.0. */
+  dialect?: Dialect;
 }
 
 interface JsonRpcRequest {
@@ -89,6 +116,8 @@ interface JsonRpcRequest {
   method?: string;
   params?: unknown;
 }
+
+type Dialect = "1.0" | "0.3";
 
 // --------------------------------------------------------------------------
 // CORS allowlist (matches cloudflare-math worker exactly).
@@ -117,7 +146,9 @@ function corsHeaders(origin: string | null): Record<string, string> {
   const allowed = originAllowed(origin);
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type",
+    // A2A-Version / A2A-Extensions are the 1.0 service parameters
+    // clients send as HTTP headers; browsers preflight on them.
+    "access-control-allow-headers": "content-type, a2a-version, a2a-extensions",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -133,16 +164,24 @@ function buildAgentCard(selfUrl: string) {
   return {
     name: "Task Runner",
     description:
-      "A2A 1.0 reference agent exercising the full task lifecycle: " +
-      "Tasks via message/send, SSE streaming via message/stream, " +
-      "tasks/get/list/cancel, tasks/resubscribe, and " +
-      "tasks/pushNotificationConfig/{set,get,list,delete}. " +
-      "Echoes input back over N work units (default 5; client may " +
-      "send 'count: N' to override).",
-    version: "1.0.0",
+      "A2A reference agent exercising the full task lifecycle: " +
+      "SendMessage, SSE streaming via SendStreamingMessage, " +
+      "GetTask / ListTasks / CancelTask, SubscribeToTask, and " +
+      "{Create,Get,List,Delete}TaskPushNotificationConfig. " +
+      "Serves A2A 1.0 and, on the same URL, A2A 0.3. Echoes input " +
+      "back over N work units (default 5; client may send " +
+      "'count: N' to override).",
+    version: "1.1.0",
     supportedInterfaces: [
       { url: selfUrl, protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+      { url: selfUrl, protocolBinding: "JSONRPC", protocolVersion: "0.3" },
     ],
+    // A2A 0.3 top-level fields, so 0.3 clients can read the same card
+    // (the merge the a2a-sdk's card route performs for dual-version
+    // agents). 1.0 clients ignore unrecognized fields.
+    url: selfUrl,
+    protocolVersion: "0.3",
+    preferredTransport: "JSONRPC",
     capabilities: {
       streaming: true,
       pushNotifications: true,
@@ -167,33 +206,135 @@ function buildAgentCard(selfUrl: string) {
 }
 
 // --------------------------------------------------------------------------
+// Methods per protocol version.
+// --------------------------------------------------------------------------
+
+type Op =
+  | "send"
+  | "stream"
+  | "get"
+  | "list"
+  | "cancel"
+  | "subscribe"
+  | "push_set"
+  | "push_get"
+  | "push_list"
+  | "push_delete"
+  | "extended_card";
+
+const METHODS: Record<Dialect, Record<Op, string>> = {
+  "1.0": {
+    send: "SendMessage",
+    stream: "SendStreamingMessage",
+    get: "GetTask",
+    list: "ListTasks",
+    cancel: "CancelTask",
+    subscribe: "SubscribeToTask",
+    push_set: "CreateTaskPushNotificationConfig",
+    push_get: "GetTaskPushNotificationConfig",
+    push_list: "ListTaskPushNotificationConfigs",
+    push_delete: "DeleteTaskPushNotificationConfig",
+    extended_card: "GetExtendedAgentCard",
+  },
+  "0.3": {
+    send: "message/send",
+    stream: "message/stream",
+    get: "tasks/get",
+    // Not part of A2A 0.3; earlier releases of this agent served it.
+    list: "tasks/list",
+    cancel: "tasks/cancel",
+    subscribe: "tasks/resubscribe",
+    push_set: "tasks/pushNotificationConfig/set",
+    push_get: "tasks/pushNotificationConfig/get",
+    push_list: "tasks/pushNotificationConfig/list",
+    push_delete: "tasks/pushNotificationConfig/delete",
+    extended_card: "agent/getAuthenticatedExtendedCard",
+  },
+};
+
+const METHOD_LOOKUP = new Map<string, { dialect: Dialect; op: Op }>();
+for (const dialect of ["1.0", "0.3"] as const) {
+  for (const [op, name] of Object.entries(METHODS[dialect])) {
+    METHOD_LOOKUP.set(name, { dialect, op: op as Op });
+  }
+}
+
+/** Requested protocol version from the A2A-Version header
+ *  (§3.6.2: absent = 0.3); `null` when it names a version this agent
+ *  does not serve. */
+function requestedDialect(header: string | null): Dialect | null {
+  if (!header || !header.trim()) return "0.3";
+  const versions = header.split(",").map((v) => v.trim());
+  if (versions.some((v) => /^1(\.\d+)*$/.test(v))) return "1.0";
+  if (versions.some((v) => /^0\.3(\.\d+)*$/.test(v))) return "0.3";
+  return null;
+}
+
+// --------------------------------------------------------------------------
 // JSON-RPC helpers (used by the DO; CORS headers are added by the
 // outer worker after the DO returns).
 // --------------------------------------------------------------------------
 
-function rpcResult(
-  id: string | number | null | undefined,
-  result: unknown,
-): Response {
+type RpcId = string | number | null | undefined;
+
+function rpcResult(id: RpcId, result: unknown): Response {
   return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
 }
 
-function rpcError(
-  id: string | number | null | undefined,
-  code: number,
+/** A2A error codes (§5.4) with their google.rpc.ErrorInfo reasons. */
+const A2A_ERRORS = {
+  TASK_NOT_FOUND: -32001,
+  TASK_NOT_CANCELABLE: -32002,
+  PUSH_NOTIFICATION_NOT_SUPPORTED: -32003,
+  UNSUPPORTED_OPERATION: -32004,
+  CONTENT_TYPE_NOT_SUPPORTED: -32005,
+  EXTENDED_AGENT_CARD_NOT_CONFIGURED: -32007,
+  VERSION_NOT_SUPPORTED: -32009,
+  INVALID_PARAMS: -32602,
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INTERNAL_ERROR: -32603,
+  JSON_PARSE_ERROR: -32700,
+} as const;
+type A2AErrorReason = keyof typeof A2A_ERRORS;
+
+/** JSON-RPC error body. 1.0 attaches a google.rpc.ErrorInfo in
+ *  `error.data` (§9.5); 0.3 errors carry code + message only. */
+function errorBody(
+  id: RpcId,
+  reason: A2AErrorReason,
   message: string,
+  dialect: Dialect = "1.0",
+) {
+  const error: Record<string, unknown> = { code: A2A_ERRORS[reason], message };
+  if (dialect === "1.0") {
+    error.data = [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        reason,
+        domain: "a2a-protocol.org",
+        metadata: {},
+      },
+    ];
+  }
+  return { jsonrpc: "2.0", id: id ?? null, error };
+}
+
+function rpcError(
+  id: RpcId,
+  reason: A2AErrorReason,
+  message: string,
+  dialect: Dialect = "1.0",
 ): Response {
-  return Response.json({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: { code, message },
-  });
+  return Response.json(errorBody(id, reason, message, dialect));
 }
 
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
 
+/** Text of every text part, accepting both 0.3 (`{kind, text}`) and
+ *  1.0 (`{text}`) Parts. */
 function extractText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
   const parts = (message as { parts?: unknown }).parts;
@@ -232,6 +373,267 @@ function sseEvent(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
+const SSE_HEADERS = {
+  "content-type": "text/event-stream",
+  "cache-control": "no-cache",
+} as const;
+
+/** Optional int32 field from a ProtoJSON object (ints may arrive as
+ *  strings). Returns undefined when absent or malformed. */
+function optInt(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isInteger(v)) return v;
+  if (typeof v === "string" && /^-?\d+$/.test(v)) return parseInt(v, 10);
+  return undefined;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v ? v : undefined;
+}
+
+/** Max tasks ListTasks scans (newest first) before filtering. */
+const LIST_SCAN_LIMIT = 500;
+/** Upper bound on a SubscribeToTask stream's lifetime. */
+const SUBSCRIBE_MAX_MS = 30_000;
+
+// --------------------------------------------------------------------------
+// Rendering: A2A 1.0 (ProtoJSON of a2a.proto). The official SDKs parse
+// strictly (unknown fields are rejected), so the 1.0 renderers emit
+// exactly these fields and nothing else.
+// --------------------------------------------------------------------------
+
+function isAgent(role: Message["role"]): boolean {
+  return role === "agent" || role === "ROLE_AGENT";
+}
+
+function v1Parts(parts: MessagePart[]) {
+  return parts.map((p) => ({ text: p.text }));
+}
+
+function v1Message(m: Message) {
+  return {
+    messageId: m.messageId,
+    ...(m.contextId ? { contextId: m.contextId } : {}),
+    ...(m.taskId ? { taskId: m.taskId } : {}),
+    role: isAgent(m.role) ? "ROLE_AGENT" : "ROLE_USER",
+    parts: v1Parts(m.parts),
+  };
+}
+
+function v1Artifact(a: ArtifactObj) {
+  return {
+    artifactId: a.artifactId,
+    ...(a.name ? { name: a.name } : {}),
+    parts: v1Parts(a.parts),
+  };
+}
+
+function v1Status(s: TaskStatus) {
+  return {
+    state: s.state,
+    ...(s.message ? { message: v1Message(s.message) } : {}),
+    timestamp: s.timestamp,
+  };
+}
+
+interface RenderOpts {
+  historyLength?: number;
+  includeArtifacts?: boolean;
+}
+
+/** `historyLength` per spec: unset = no limit, 0 = omit, N = last N. */
+function trimHistory(history: Message[], historyLength?: number): Message[] {
+  if (typeof historyLength !== "number") return history;
+  return historyLength <= 0 ? [] : history.slice(-historyLength);
+}
+
+function v1Task(t: Task, opts: RenderOpts = {}) {
+  const history = trimHistory(t.history, opts.historyLength);
+  const includeArtifacts = opts.includeArtifacts ?? true;
+  return {
+    id: t.id,
+    contextId: t.contextId,
+    status: v1Status(t.status),
+    ...(includeArtifacts && t.artifacts.length
+      ? { artifacts: t.artifacts.map(v1Artifact) }
+      : {}),
+    ...(history.length ? { history: history.map(v1Message) } : {}),
+  };
+}
+
+function v1PushConfig(taskId: string, c: PushNotificationConfig) {
+  const scheme = c.authentication?.schemes?.[0];
+  return {
+    id: c.id,
+    taskId,
+    url: c.url,
+    ...(c.token ? { token: c.token } : {}),
+    ...(scheme
+      ? {
+          authentication: {
+            scheme,
+            ...(c.authentication?.credentials
+              ? { credentials: c.authentication.credentials }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+// --------------------------------------------------------------------------
+// Rendering: A2A 0.3 (kind discriminators, lower-case states).
+// --------------------------------------------------------------------------
+
+const V03_STATE: Record<TaskState, string> = {
+  TASK_STATE_SUBMITTED: "submitted",
+  TASK_STATE_WORKING: "working",
+  TASK_STATE_INPUT_REQUIRED: "input-required",
+  TASK_STATE_COMPLETED: "completed",
+  TASK_STATE_CANCELED: "canceled",
+  TASK_STATE_FAILED: "failed",
+  TASK_STATE_REJECTED: "rejected",
+  TASK_STATE_AUTH_REQUIRED: "auth-required",
+};
+
+function v03Parts(parts: MessagePart[]) {
+  return parts.map((p) => ({ kind: "text", text: p.text }));
+}
+
+function v03Message(m: Message) {
+  return {
+    kind: "message",
+    messageId: m.messageId,
+    ...(m.contextId ? { contextId: m.contextId } : {}),
+    ...(m.taskId ? { taskId: m.taskId } : {}),
+    role: isAgent(m.role) ? "agent" : "user",
+    parts: v03Parts(m.parts),
+  };
+}
+
+function v03Artifact(a: ArtifactObj) {
+  return {
+    artifactId: a.artifactId,
+    ...(a.name ? { name: a.name } : {}),
+    parts: v03Parts(a.parts),
+  };
+}
+
+function v03Status(s: TaskStatus) {
+  return {
+    state: V03_STATE[s.state] ?? "unknown",
+    ...(s.message ? { message: v03Message(s.message) } : {}),
+    timestamp: s.timestamp,
+  };
+}
+
+function v03Task(t: Task, opts: RenderOpts = {}) {
+  const history = trimHistory(t.history, opts.historyLength);
+  return {
+    kind: "task",
+    id: t.id,
+    contextId: t.contextId,
+    status: v03Status(t.status),
+    ...(t.artifacts.length ? { artifacts: t.artifacts.map(v03Artifact) } : {}),
+    ...(history.length ? { history: history.map(v03Message) } : {}),
+  };
+}
+
+function v03PushConfig(taskId: string, c: PushNotificationConfig) {
+  return {
+    taskId,
+    pushNotificationConfig: {
+      id: c.id,
+      url: c.url,
+      ...(c.token ? { token: c.token } : {}),
+      ...(c.authentication ? { authentication: c.authentication } : {}),
+    },
+  };
+}
+
+function renderTask(dialect: Dialect, t: Task, opts: RenderOpts = {}) {
+  return dialect === "1.0" ? v1Task(t, opts) : v03Task(t, opts);
+}
+
+// --------------------------------------------------------------------------
+// Streaming events.
+// --------------------------------------------------------------------------
+
+/** One streamed event, in the 1.0 StreamResponse oneof shape. */
+type StreamEvent =
+  | { task: Task }
+  | { artifactUpdate: { taskId: string; artifact: ArtifactObj } }
+  | { statusUpdate: { taskId: string; status: TaskStatus } };
+
+/** The JSON-RPC `result` of one SSE frame in `dialect`. */
+function renderStreamEvent(dialect: Dialect, e: StreamEvent, contextId: string) {
+  if ("task" in e) {
+    return dialect === "1.0" ? { task: v1Task(e.task) } : v03Task(e.task);
+  }
+  if ("artifactUpdate" in e) {
+    const { taskId, artifact } = e.artifactUpdate;
+    return dialect === "1.0"
+      ? { artifactUpdate: { taskId, contextId, artifact: v1Artifact(artifact) } }
+      : {
+          kind: "artifact-update",
+          taskId,
+          contextId,
+          artifact: v03Artifact(artifact),
+        };
+  }
+  const { taskId, status } = e.statusUpdate;
+  return dialect === "1.0"
+    ? { statusUpdate: { taskId, contextId, status: v1Status(status) } }
+    : {
+        kind: "status-update",
+        taskId,
+        contextId,
+        status: v03Status(status),
+        final: TERMINAL_STATES.has(status.state),
+      };
+}
+
+// --------------------------------------------------------------------------
+// Push-config parsing.
+// --------------------------------------------------------------------------
+
+/** 1.0 TaskPushNotificationConfig (flat) -> stored config. */
+function fromV1PushConfig(raw: Record<string, unknown>): PushNotificationConfig | string {
+  const url = str(raw.url);
+  if (!url) return "url is required";
+  const auth = raw.authentication as { scheme?: unknown; credentials?: unknown } | undefined;
+  const scheme = auth ? str(auth.scheme) : undefined;
+  return {
+    id: str(raw.id) ?? crypto.randomUUID(),
+    url,
+    ...(str(raw.token) ? { token: raw.token as string } : {}),
+    ...(scheme
+      ? {
+          authentication: {
+            schemes: [scheme],
+            ...(typeof auth?.credentials === "string" ? { credentials: auth.credentials } : {}),
+          },
+        }
+      : {}),
+    dialect: "1.0",
+  };
+}
+
+/** 0.3 PushNotificationConfig (nested) -> stored config. */
+function fromV03PushConfig(raw: Record<string, unknown>): PushNotificationConfig | string {
+  const url = str(raw.url);
+  if (!url) return "pushNotificationConfig.url is required";
+  const auth = raw.authentication as PushNotificationConfig["authentication"] | undefined;
+  return {
+    id: str(raw.id) ?? crypto.randomUUID(),
+    url,
+    ...(str(raw.token) ? { token: raw.token as string } : {}),
+    ...(auth && typeof auth === "object" && Array.isArray(auth.schemes)
+      ? { authentication: auth }
+      : {}),
+    dialect: "0.3",
+  };
+}
+
 // --------------------------------------------------------------------------
 // Durable Object: the single source of truth for tasks + push configs.
 //
@@ -267,7 +669,8 @@ export class TaskRunnerDO implements DurableObject {
     await this.state.storage.put(this.taskKey(task.id), task);
   }
 
-  private async listTasks(max = 50): Promise<Task[]> {
+  /** Up to `max` stored tasks, newest first by status timestamp. */
+  private async listTasks(max: number): Promise<Task[]> {
     const map = await this.state.storage.list<Task>({
       prefix: "task:",
       limit: max,
@@ -278,20 +681,11 @@ export class TaskRunnerDO implements DurableObject {
     return out;
   }
 
-  private async getPushConfigs(
-    taskId: string,
-  ): Promise<PushNotificationConfig[]> {
-    return (
-      (await this.state.storage.get<PushNotificationConfig[]>(
-        this.pushKey(taskId),
-      )) ?? []
-    );
+  private async getPushConfigs(taskId: string): Promise<PushNotificationConfig[]> {
+    return (await this.state.storage.get<PushNotificationConfig[]>(this.pushKey(taskId))) ?? [];
   }
 
-  private async putPushConfigs(
-    taskId: string,
-    configs: PushNotificationConfig[],
-  ): Promise<void> {
+  private async putPushConfigs(taskId: string, configs: PushNotificationConfig[]): Promise<void> {
     if (configs.length === 0) {
       await this.state.storage.delete(this.pushKey(taskId));
     } else {
@@ -299,20 +693,39 @@ export class TaskRunnerDO implements DurableObject {
     }
   }
 
+  private async addPushConfig(taskId: string, cfg: PushNotificationConfig): Promise<void> {
+    const existing = await this.getPushConfigs(taskId);
+    await this.putPushConfigs(taskId, [...existing.filter((c) => c.id !== cfg.id), cfg]);
+  }
+
+  /**
+   * Webhook delivery. A config registered over 1.0 receives a
+   * StreamResponse (`{"task": ...}`, A2A 1.0 §4.3.3) with the token in
+   * `X-A2A-Notification-Token` and `Authorization: <scheme>
+   * <credentials>` when authentication is configured — the same
+   * headers the a2a-sdk sender uses. Configs registered over 0.3 (or
+   * stored before 1.0) keep receiving the bare Task as before.
+   */
   private async firePushNotifications(task: Task): Promise<void> {
     const configs = await this.getPushConfigs(task.id);
     for (const cfg of configs) {
-      const init: RequestInit = {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(task),
-      };
-      if (cfg.token) {
-        (init.headers as Record<string, string>)["authorization"] =
-          `Bearer ${cfg.token}`;
+      const headers: Record<string, string> = {};
+      let body: unknown;
+      if (cfg.dialect === "1.0") {
+        headers["content-type"] = "application/a2a+json";
+        body = { task: v1Task(task) };
+        if (cfg.token) headers["x-a2a-notification-token"] = cfg.token;
+        const scheme = cfg.authentication?.schemes?.[0];
+        if (scheme && cfg.authentication?.credentials) {
+          headers.authorization = `${scheme} ${cfg.authentication.credentials}`;
+        }
+      } else {
+        headers["content-type"] = "application/json";
+        body = cfg.dialect === "0.3" ? v03Task(task) : task;
+        if (cfg.token) headers.authorization = `Bearer ${cfg.token}`;
       }
       try {
-        await fetch(cfg.url, init);
+        await fetch(cfg.url, { method: "POST", headers, body: JSON.stringify(body) });
       } catch {
         /* swallow — push delivery is best-effort */
       }
@@ -347,17 +760,7 @@ export class TaskRunnerDO implements DurableObject {
     };
   }
 
-  private async processTaskWork(
-    task: Task,
-    text: string,
-    count: number,
-  ): Promise<void> {
-    for (let i = 1; i <= count; i++) {
-      await delay(50);
-      const live = await this.getTask(task.id);
-      if (live?.status.state === "TASK_STATE_CANCELED") return;
-      task.artifacts.push(this.makeArtifact(i, count, text));
-    }
+  private complete(task: Task, count: number): void {
     task.status = { state: "TASK_STATE_COMPLETED", timestamp: nowIso() };
     task.history.push({
       messageId: crypto.randomUUID(),
@@ -366,302 +769,393 @@ export class TaskRunnerDO implements DurableObject {
       contextId: task.contextId,
       taskId: task.id,
     });
+  }
+
+  /**
+   * Run the task's work units. `onEvent` receives each update as it
+   * happens (streaming callers); every unit is persisted so GetTask /
+   * SubscribeToTask observe progress mid-flight.
+   */
+  private async processTaskWork(
+    task: Task,
+    text: string,
+    count: number,
+    onEvent?: (e: StreamEvent) => void,
+  ): Promise<void> {
+    for (let i = 1; i <= count; i++) {
+      await delay(50);
+      const live = await this.getTask(task.id);
+      if (live?.status.state === "TASK_STATE_CANCELED") {
+        onEvent?.({ statusUpdate: { taskId: task.id, status: live.status } });
+        return;
+      }
+      const artifact = this.makeArtifact(i, count, text);
+      task.artifacts.push(artifact);
+      await this.putTask(task);
+      onEvent?.({ artifactUpdate: { taskId: task.id, artifact } });
+    }
+    this.complete(task, count);
     await this.putTask(task);
+    onEvent?.({ statusUpdate: { taskId: task.id, status: task.status } });
     await this.firePushNotifications(task);
   }
 
-  // --- method handlers ---
-
-  private async handleMessageSend(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as {
-      message?: unknown;
-      configuration?: { blocking?: unknown };
-    };
-    const text = extractText(params.message);
-    if (!text) {
-      return rpcError(
-        body.id,
-        -32602,
-        "invalid params: no text part found in message.parts",
-      );
-    }
-    const max = parseInt(this.env.MAX_WORK_UNITS, 10) || 20;
-    const count = parseCount(text, max);
-    const requestedContextId = (params.message as { contextId?: unknown })
-      ?.contextId;
-    const contextId =
-      typeof requestedContextId === "string" && requestedContextId
-        ? requestedContextId
-        : undefined;
-
-    const task = this.makeTask(text, contextId);
-    task.status = { state: "TASK_STATE_WORKING", timestamp: nowIso() };
-    await this.putTask(task);
-
-    const blocking = (params.configuration?.blocking ?? true) !== false;
-    if (!blocking) {
-      // ctx.waitUntil wired through state.waitUntil — keeps the DO
-      // alive long enough to finish the work after returning the
-      // SUBMITTED task to the caller.
-      this.state.waitUntil(this.processTaskWork(task, text, count));
-      return rpcResult(body.id, task);
-    }
-
-    await this.processTaskWork(task, text, count);
-    const final = (await this.getTask(task.id)) ?? task;
-    return rpcResult(body.id, final);
-  }
-
-  private async handleMessageStream(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as { message?: unknown };
-    const text = extractText(params.message);
-    if (!text) {
-      return rpcError(
-        body.id,
-        -32602,
-        "invalid params: no text part found in message.parts",
-      );
-    }
-    const max = parseInt(this.env.MAX_WORK_UNITS, 10) || 20;
-    const count = parseCount(text, max);
-    const requestedContextId = (params.message as { contextId?: unknown })
-      ?.contextId;
-    const contextId =
-      typeof requestedContextId === "string" && requestedContextId
-        ? requestedContextId
-        : undefined;
-
-    const task = this.makeTask(text, contextId);
-    task.status = { state: "TASK_STATE_WORKING", timestamp: nowIso() };
-    await this.putTask(task);
-
+  private sseStream(
+    body: JsonRpcRequest,
+    dialect: Dialect,
+    contextId: string,
+    run: (emit: (e: StreamEvent) => void) => Promise<void>,
+  ): Response {
     const encoder = new TextEncoder();
-    const self = this;
     const stream = new ReadableStream({
       async start(controller) {
-        controller.enqueue(encoder.encode(sseEvent({ task })));
-        for (let i = 1; i <= count; i++) {
-          await delay(50);
-          const live = await self.getTask(task.id);
-          if (live?.status.state === "TASK_STATE_CANCELED") {
+        // A2A 1.0 §9.4.2 (and 0.3): every SSE frame is a full JSON-RPC
+        // response echoing the request id.
+        // If the client disconnects, enqueue throws; keep running the
+        // task (it must still reach a terminal state and fire webhooks)
+        // and just stop writing to the stream.
+        let open = true;
+        const emit = (e: StreamEvent) => {
+          if (!open) return;
+          try {
             controller.enqueue(
               encoder.encode(
                 sseEvent({
-                  statusUpdate: { taskId: task.id, status: live.status },
+                  jsonrpc: "2.0",
+                  id: body.id ?? null,
+                  result: renderStreamEvent(dialect, e, contextId),
                 }),
               ),
             );
-            controller.close();
-            return;
+          } catch {
+            open = false;
           }
-          const artifact = self.makeArtifact(i, count, text);
-          task.artifacts.push(artifact);
-          await self.putTask(task);
-          controller.enqueue(
-            encoder.encode(
-              sseEvent({ artifactUpdate: { taskId: task.id, artifact } }),
-            ),
-          );
+        };
+        try {
+          await run(emit);
+        } finally {
+          if (open) {
+            try {
+              controller.close();
+            } catch {
+              /* already closed by the client */
+            }
+          }
         }
-        task.status = { state: "TASK_STATE_COMPLETED", timestamp: nowIso() };
-        task.history.push({
-          messageId: crypto.randomUUID(),
-          role: "agent",
-          parts: [{ kind: "text", text: `done: ${count} unit(s)` }],
-          contextId: task.contextId,
-          taskId: task.id,
-        });
-        await self.putTask(task);
-        controller.enqueue(
-          encoder.encode(
-            sseEvent({
-              statusUpdate: { taskId: task.id, status: task.status },
-            }),
-          ),
-        );
-        controller.close();
-        await self.firePushNotifications(task);
       },
     });
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-      },
+    return new Response(stream, { status: 200, headers: SSE_HEADERS });
+  }
+
+  // --- method handlers (shared by both protocol versions) ---
+
+  private async handleSend(
+    body: JsonRpcRequest,
+    dialect: Dialect,
+    streaming: boolean,
+  ): Promise<Response> {
+    const params = (body.params ?? {}) as {
+      message?: unknown;
+      configuration?: Record<string, unknown>;
+    };
+    if (!params.message || typeof params.message !== "object") {
+      return rpcError(body.id, "INVALID_PARAMS", "params.message is required", dialect);
+    }
+    const text = extractText(params.message);
+    if (!text) {
+      return rpcError(body.id, "INVALID_PARAMS", "no text part found in message.parts", dialect);
+    }
+    const cfg = params.configuration ?? {};
+    // Inline push config: 1.0 configuration.taskPushNotificationConfig,
+    // 0.3 configuration.pushNotificationConfig.
+    let inlinePush: PushNotificationConfig | undefined;
+    const rawPush = dialect === "1.0" ? cfg.taskPushNotificationConfig : cfg.pushNotificationConfig;
+    if (rawPush && typeof rawPush === "object") {
+      const parsed =
+        dialect === "1.0"
+          ? fromV1PushConfig(rawPush as Record<string, unknown>)
+          : fromV03PushConfig(rawPush as Record<string, unknown>);
+      if (typeof parsed === "string") {
+        return rpcError(body.id, "INVALID_PARAMS", `push config: ${parsed}`, dialect);
+      }
+      inlinePush = parsed;
+    }
+    const max = parseInt(this.env.MAX_WORK_UNITS, 10) || 20;
+    const count = parseCount(text, max);
+    const contextId = str((params.message as { contextId?: unknown }).contextId);
+    const historyLength = optInt(cfg.historyLength);
+
+    const task = this.makeTask(text, contextId);
+    task.status = { state: "TASK_STATE_WORKING", timestamp: nowIso() };
+    await this.putTask(task);
+    if (inlinePush) await this.addPushConfig(task.id, inlinePush);
+
+    if (streaming) {
+      return this.sseStream(body, dialect, task.contextId, async (emit) => {
+        emit({ task: structuredClone(task) });
+        await this.processTaskWork(task, text, count, emit);
+      });
+    }
+
+    // Non-blocking: 1.0 returnImmediately=true, 0.3 blocking=false.
+    const returnImmediately =
+      dialect === "1.0" ? cfg.returnImmediately === true : cfg.blocking === false;
+    if (returnImmediately) {
+      // state.waitUntil keeps the DO alive to finish the work after
+      // returning the WORKING task to the caller.
+      this.state.waitUntil(this.processTaskWork(task, text, count));
+      const rendered = renderTask(dialect, task, { historyLength });
+      return rpcResult(body.id, dialect === "1.0" ? { task: rendered } : rendered);
+    }
+    await this.processTaskWork(task, text, count);
+    const final = (await this.getTask(task.id)) ?? task;
+    const rendered = renderTask(dialect, final, { historyLength });
+    return rpcResult(body.id, dialect === "1.0" ? { task: rendered } : rendered);
+  }
+
+  private async handleGet(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const params = (body.params ?? {}) as { id?: unknown; historyLength?: unknown };
+    const id = str(params.id);
+    if (!id) return rpcError(body.id, "INVALID_PARAMS", "params.id is required", dialect);
+    const task = await this.getTask(id);
+    if (!task) return rpcError(body.id, "TASK_NOT_FOUND", `task ${id} not found`, dialect);
+    return rpcResult(
+      body.id,
+      renderTask(dialect, task, { historyLength: optInt(params.historyLength) }),
+    );
+  }
+
+  private async handleList(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const params = (body.params ?? {}) as Record<string, unknown>;
+    const pageSize = optInt(params.pageSize) ?? 50;
+    if (pageSize < 1 || pageSize > 100) {
+      return rpcError(body.id, "INVALID_PARAMS", "pageSize must be between 1 and 100", dialect);
+    }
+    let offset = 0;
+    if (str(params.pageToken)) {
+      const n = optInt(params.pageToken);
+      if (n === undefined || n < 0) {
+        return rpcError(body.id, "INVALID_PARAMS", "invalid pageToken", dialect);
+      }
+      offset = n;
+    }
+    let tasks = await this.listTasks(LIST_SCAN_LIMIT);
+    const contextId = str(params.contextId);
+    if (contextId) tasks = tasks.filter((t) => t.contextId === contextId);
+    const status = str(params.status);
+    if (status && status !== "TASK_STATE_UNSPECIFIED") {
+      tasks = tasks.filter((t) => t.status.state === status);
+    }
+    const page = tasks.slice(offset, offset + pageSize);
+    const historyLength = optInt(params.historyLength);
+    if (dialect === "0.3") {
+      // Pre-1.0 extension shape served by earlier releases.
+      return rpcResult(body.id, { tasks: page.map((t) => v03Task(t, { historyLength })) });
+    }
+    const includeArtifacts = params.includeArtifacts === true;
+    return rpcResult(body.id, {
+      tasks: page.map((t) => v1Task(t, { historyLength, includeArtifacts })),
+      nextPageToken: offset + pageSize < tasks.length ? String(offset + pageSize) : "",
+      pageSize,
+      totalSize: tasks.length,
     });
   }
 
-  private async handleTasksGet(body: JsonRpcRequest): Promise<Response> {
+  private async handleCancel(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
     const params = (body.params ?? {}) as { id?: unknown };
-    if (typeof params.id !== "string" || !params.id) {
-      return rpcError(body.id, -32602, "params.id is required");
-    }
-    const task = await this.getTask(params.id);
-    if (!task) return rpcError(body.id, -32001, "task not found");
-    return rpcResult(body.id, task);
-  }
-
-  private async handleTasksList(body: JsonRpcRequest): Promise<Response> {
-    const tasks = await this.listTasks();
-    return rpcResult(body.id, { tasks });
-  }
-
-  private async handleTasksCancel(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as { id?: unknown };
-    if (typeof params.id !== "string" || !params.id) {
-      return rpcError(body.id, -32602, "params.id is required");
-    }
-    const task = await this.getTask(params.id);
-    if (!task) return rpcError(body.id, -32001, "task not found");
+    const id = str(params.id);
+    if (!id) return rpcError(body.id, "INVALID_PARAMS", "params.id is required", dialect);
+    const task = await this.getTask(id);
+    if (!task) return rpcError(body.id, "TASK_NOT_FOUND", `task ${id} not found`, dialect);
     if (TERMINAL_STATES.has(task.status.state)) {
-      return rpcResult(body.id, task);
+      return rpcError(
+        body.id,
+        "TASK_NOT_CANCELABLE",
+        `task ${task.id} is in terminal state ${task.status.state}`,
+        dialect,
+      );
     }
     task.status = { state: "TASK_STATE_CANCELED", timestamp: nowIso() };
     await this.putTask(task);
-    return rpcResult(body.id, task);
+    // Canceled is terminal: notify registered webhooks, as on completion.
+    this.state.waitUntil(this.firePushNotifications(task));
+    return rpcResult(body.id, renderTask(dialect, task));
   }
 
-  private async handleTasksResubscribe(body: JsonRpcRequest): Promise<Response> {
+  /** Streams the current Task, then every subsequent artifact /
+   *  status change until the task reaches a terminal state. */
+  private async handleSubscribe(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
     const params = (body.params ?? {}) as { id?: unknown };
-    if (typeof params.id !== "string" || !params.id) {
-      return rpcError(body.id, -32602, "params.id is required");
-    }
-    const task = await this.getTask(params.id);
-    if (!task) return rpcError(body.id, -32001, "task not found");
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(sseEvent({ task })));
-        controller.close();
-      },
-    });
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-      },
-    });
-  }
-
-  private async handlePushSet(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as {
-      taskId?: unknown;
-      pushNotificationConfig?: unknown;
-    };
-    if (typeof params.taskId !== "string" || !params.taskId) {
-      return rpcError(body.id, -32602, "params.taskId is required");
-    }
-    const task = await this.getTask(params.taskId);
-    if (!task) return rpcError(body.id, -32001, "task not found");
-    const cfg = params.pushNotificationConfig as Record<string, unknown> | null;
-    if (!cfg || typeof cfg !== "object") {
-      return rpcError(
-        body.id,
-        -32602,
-        "params.pushNotificationConfig is required",
-      );
-    }
-    if (typeof cfg.url !== "string" || !cfg.url) {
-      return rpcError(
-        body.id,
-        -32602,
-        "params.pushNotificationConfig.url is required",
-      );
-    }
-    const stored: PushNotificationConfig = {
-      id: typeof cfg.id === "string" && cfg.id ? cfg.id : crypto.randomUUID(),
-      url: cfg.url,
-      ...(typeof cfg.token === "string" ? { token: cfg.token } : {}),
-      ...(cfg.authentication && typeof cfg.authentication === "object"
-        ? {
-            authentication:
-              cfg.authentication as PushNotificationConfig["authentication"],
-          }
-        : {}),
-    };
-    const existing = await this.getPushConfigs(params.taskId);
-    const without = existing.filter((c) => c.id !== stored.id);
-    without.push(stored);
-    await this.putPushConfigs(params.taskId, without);
-    return rpcResult(body.id, {
-      taskId: params.taskId,
-      pushNotificationConfig: stored,
-    });
-  }
-
-  private async handlePushGet(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as {
-      taskId?: unknown;
-      pushNotificationConfigId?: unknown;
-    };
-    if (typeof params.taskId !== "string" || !params.taskId) {
-      return rpcError(body.id, -32602, "params.taskId is required");
-    }
-    const configs = await this.getPushConfigs(params.taskId);
-    if (typeof params.pushNotificationConfigId === "string") {
-      const cfg = configs.find(
-        (c) => c.id === params.pushNotificationConfigId,
-      );
-      if (!cfg) {
+    const id = str(params.id);
+    if (!id) return rpcError(body.id, "INVALID_PARAMS", "params.id is required", dialect);
+    const initial = await this.getTask(id);
+    if (!initial) return rpcError(body.id, "TASK_NOT_FOUND", `task ${id} not found`, dialect);
+    if (TERMINAL_STATES.has(initial.status.state)) {
+      // 1.0 §3.1.6: terminal tasks cannot be subscribed to. 0.3 clients
+      // historically got a one-event snapshot; keep that for them.
+      if (dialect === "1.0") {
         return rpcError(
           body.id,
-          -32001,
-          "push notification config not found",
+          "UNSUPPORTED_OPERATION",
+          `task ${initial.id} is in terminal state ${initial.status.state}`,
+          dialect,
         );
       }
-      return rpcResult(body.id, {
-        taskId: params.taskId,
-        pushNotificationConfig: cfg,
+      return this.sseStream(body, dialect, initial.contextId, async (emit) => {
+        emit({ task: initial });
       });
     }
-    if (configs.length === 0) {
-      return rpcError(body.id, -32001, "no push notification config for task");
-    }
-    return rpcResult(body.id, {
-      taskId: params.taskId,
-      pushNotificationConfig: configs[0],
+    return this.sseStream(body, dialect, initial.contextId, async (emit) => {
+      emit({ task: initial });
+      let seen = initial.artifacts.length;
+      const deadline = Date.now() + SUBSCRIBE_MAX_MS;
+      while (Date.now() < deadline) {
+        await delay(50);
+        const live = await this.getTask(initial.id);
+        if (!live) break;
+        for (const artifact of live.artifacts.slice(seen)) {
+          emit({ artifactUpdate: { taskId: live.id, artifact } });
+        }
+        seen = live.artifacts.length;
+        if (TERMINAL_STATES.has(live.status.state)) {
+          emit({ statusUpdate: { taskId: live.id, status: live.status } });
+          break;
+        }
+      }
     });
   }
 
-  private async handlePushList(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as { taskId?: unknown };
-    if (typeof params.taskId !== "string" || !params.taskId) {
-      return rpcError(body.id, -32602, "params.taskId is required");
+  private async handlePushSet(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const params = (body.params ?? {}) as Record<string, unknown>;
+    const taskId = str(params.taskId);
+    if (!taskId) return rpcError(body.id, "INVALID_PARAMS", "params.taskId is required", dialect);
+    if (!(await this.getTask(taskId))) {
+      return rpcError(body.id, "TASK_NOT_FOUND", `task ${taskId} not found`, dialect);
     }
-    const configs = await this.getPushConfigs(params.taskId);
-    return rpcResult(body.id, {
-      taskId: params.taskId,
-      pushNotificationConfigs: configs,
-    });
+    let parsed: PushNotificationConfig | string;
+    if (dialect === "1.0") {
+      parsed = fromV1PushConfig(params);
+    } else {
+      const inner = params.pushNotificationConfig;
+      parsed =
+        inner && typeof inner === "object"
+          ? fromV03PushConfig(inner as Record<string, unknown>)
+          : "params.pushNotificationConfig is required";
+    }
+    if (typeof parsed === "string") return rpcError(body.id, "INVALID_PARAMS", parsed, dialect);
+    await this.addPushConfig(taskId, parsed);
+    return rpcResult(
+      body.id,
+      dialect === "1.0" ? v1PushConfig(taskId, parsed) : v03PushConfig(taskId, parsed),
+    );
   }
 
-  private async handlePushDelete(body: JsonRpcRequest): Promise<Response> {
-    const params = (body.params ?? {}) as {
-      taskId?: unknown;
-      pushNotificationConfigId?: unknown;
-    };
-    if (typeof params.taskId !== "string" || !params.taskId) {
-      return rpcError(body.id, -32602, "params.taskId is required");
+  /** Push get/list/delete address the task as `taskId` in 1.0 and as
+   *  `id` in 0.3 (earlier releases of this agent also took `taskId`). */
+  private pushTarget(params: Record<string, unknown>, dialect: Dialect) {
+    return dialect === "1.0"
+      ? { taskId: str(params.taskId), configId: str(params.id) }
+      : {
+          taskId: str(params.id) ?? str(params.taskId),
+          configId: str(params.pushNotificationConfigId),
+        };
+  }
+
+  private async handlePushGet(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const { taskId, configId } = this.pushTarget(
+      (body.params ?? {}) as Record<string, unknown>,
+      dialect,
+    );
+    if (!taskId) return rpcError(body.id, "INVALID_PARAMS", "task id is required", dialect);
+    if (!(await this.getTask(taskId))) {
+      return rpcError(body.id, "TASK_NOT_FOUND", `task ${taskId} not found`, dialect);
     }
-    const configs = await this.getPushConfigs(params.taskId);
-    if (typeof params.pushNotificationConfigId === "string") {
-      const remaining = configs.filter(
-        (c) => c.id !== params.pushNotificationConfigId,
+    const configs = await this.getPushConfigs(taskId);
+    // 1.0 requires the config id; 0.3 made it optional (first config).
+    if (!configId && dialect === "1.0") {
+      return rpcError(body.id, "INVALID_PARAMS", "params.id is required", dialect);
+    }
+    const cfg = configId ? configs.find((c) => c.id === configId) : configs[0];
+    if (!cfg) {
+      return rpcError(body.id, "TASK_NOT_FOUND", "push notification config not found", dialect);
+    }
+    return rpcResult(
+      body.id,
+      dialect === "1.0" ? v1PushConfig(taskId, cfg) : v03PushConfig(taskId, cfg),
+    );
+  }
+
+  private async handlePushList(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const { taskId } = this.pushTarget((body.params ?? {}) as Record<string, unknown>, dialect);
+    if (!taskId) return rpcError(body.id, "INVALID_PARAMS", "task id is required", dialect);
+    if (!(await this.getTask(taskId))) {
+      return rpcError(body.id, "TASK_NOT_FOUND", `task ${taskId} not found`, dialect);
+    }
+    const configs = await this.getPushConfigs(taskId);
+    if (dialect === "0.3") {
+      return rpcResult(
+        body.id,
+        configs.map((c) => v03PushConfig(taskId, c)),
       );
-      if (remaining.length === configs.length) {
+    }
+    return rpcResult(body.id, {
+      configs: configs.map((c) => v1PushConfig(taskId, c)),
+      nextPageToken: "",
+    });
+  }
+
+  private async handlePushDelete(body: JsonRpcRequest, dialect: Dialect): Promise<Response> {
+    const { taskId, configId } = this.pushTarget(
+      (body.params ?? {}) as Record<string, unknown>,
+      dialect,
+    );
+    if (!taskId) return rpcError(body.id, "INVALID_PARAMS", "task id is required", dialect);
+    if (!configId) return rpcError(body.id, "INVALID_PARAMS", "config id is required", dialect);
+    const configs = await this.getPushConfigs(taskId);
+    const remaining = configs.filter((c) => c.id !== configId);
+    if (remaining.length === configs.length) {
+      return rpcError(
+        body.id,
+        "TASK_NOT_FOUND",
+        `push notification config ${configId} not found`,
+        dialect,
+      );
+    }
+    await this.putPushConfigs(taskId, remaining);
+    return rpcResult(body.id, null);
+  }
+
+  private async dispatch(body: JsonRpcRequest, dialect: Dialect, op: Op): Promise<Response> {
+    switch (op) {
+      case "send":
+        return this.handleSend(body, dialect, false);
+      case "stream":
+        return this.handleSend(body, dialect, true);
+      case "get":
+        return this.handleGet(body, dialect);
+      case "list":
+        return this.handleList(body, dialect);
+      case "cancel":
+        return this.handleCancel(body, dialect);
+      case "subscribe":
+        return this.handleSubscribe(body, dialect);
+      case "push_set":
+        return this.handlePushSet(body, dialect);
+      case "push_get":
+        return this.handlePushGet(body, dialect);
+      case "push_list":
+        return this.handlePushList(body, dialect);
+      case "push_delete":
+        return this.handlePushDelete(body, dialect);
+      case "extended_card":
+        // capabilities.extendedAgentCard is not declared (§3.3.4).
         return rpcError(
           body.id,
-          -32001,
-          "push notification config not found",
+          "UNSUPPORTED_OPERATION",
+          "this agent does not support an extended agent card",
+          dialect,
         );
-      }
-      await this.putPushConfigs(params.taskId, remaining);
-    } else {
-      await this.putPushConfigs(params.taskId, []);
     }
-    return rpcResult(body.id, {});
   }
 
   // --- DO entry point ---
@@ -671,46 +1165,38 @@ export class TaskRunnerDO implements DurableObject {
     try {
       body = (await req.json()) as JsonRpcRequest;
     } catch {
-      return rpcError(null, -32700, "parse error: body is not JSON");
+      return rpcError(null, "JSON_PARSE_ERROR", "parse error: body is not JSON");
     }
-    if (body.jsonrpc !== "2.0") {
+    if (!body || typeof body !== "object" || body.jsonrpc !== "2.0") {
+      return rpcError(body?.id, "INVALID_REQUEST", "invalid request: jsonrpc must be '2.0'");
+    }
+    const found = typeof body.method === "string" ? METHOD_LOOKUP.get(body.method) : undefined;
+    if (!found) {
+      return rpcError(body.id, "METHOD_NOT_FOUND", `method not found: ${String(body.method)}`);
+    }
+    const header = req.headers.get("a2a-version");
+    const requested = requestedDialect(header);
+    if (requested === null) {
       return rpcError(
         body.id,
-        -32600,
-        "invalid request: jsonrpc must be '2.0'",
+        "VERSION_NOT_SUPPORTED",
+        `A2A-Version ${header} is not supported; this agent serves 1.0 and 0.3`,
+        found.dialect,
+      );
+    }
+    // A 1.0 method under 0.3 semantics (no header, §3.6.2) does not exist.
+    if (found.dialect === "1.0" && requested !== "1.0") {
+      return rpcError(
+        body.id,
+        "VERSION_NOT_SUPPORTED",
+        `${body.method} is an A2A 1.0 method; send the header A2A-Version: 1.0 ` +
+          "(an absent header means 0.3, A2A 1.0 §3.6.2)",
       );
     }
     try {
-      switch (body.method) {
-        case "message/send":
-          return await this.handleMessageSend(body);
-        case "message/stream":
-          return await this.handleMessageStream(body);
-        case "tasks/get":
-          return await this.handleTasksGet(body);
-        case "tasks/list":
-          return await this.handleTasksList(body);
-        case "tasks/cancel":
-          return await this.handleTasksCancel(body);
-        case "tasks/resubscribe":
-          return await this.handleTasksResubscribe(body);
-        case "tasks/pushNotificationConfig/set":
-          return await this.handlePushSet(body);
-        case "tasks/pushNotificationConfig/get":
-          return await this.handlePushGet(body);
-        case "tasks/pushNotificationConfig/list":
-          return await this.handlePushList(body);
-        case "tasks/pushNotificationConfig/delete":
-          return await this.handlePushDelete(body);
-        default:
-          return rpcError(
-            body.id,
-            -32601,
-            `method not implemented: ${String(body.method)}`,
-          );
-      }
+      return await this.dispatch(body, found.dialect, found.op);
     } catch (err) {
-      return rpcError(body.id, -32000, (err as Error).message);
+      return rpcError(body.id, "INTERNAL_ERROR", (err as Error).message, found.dialect);
     }
   }
 }
@@ -723,10 +1209,7 @@ export class TaskRunnerDO implements DurableObject {
 
 const SINGLETON_NAME = "task-runner-singleton";
 
-function withCors(
-  resp: Response,
-  origin: string | null,
-): Response {
+function withCors(resp: Response, origin: string | null): Response {
   const merged = new Headers(resp.headers);
   for (const [k, v] of Object.entries(corsHeaders(origin))) {
     merged.set(k, v);
@@ -755,8 +1238,7 @@ export default {
     // static descriptor.
     if (
       req.method === "GET" &&
-      (url.pathname === "/" ||
-        url.pathname === "/.well-known/agent-card.json")
+      (url.pathname === "/" || url.pathname === "/.well-known/agent-card.json")
     ) {
       return Response.json(buildAgentCard(selfUrl), {
         headers: {
@@ -781,30 +1263,31 @@ export default {
     const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
     const { success } = await env.TASK_RATE_LIMITER.limit({ key: ip });
     if (!success) {
-      const errResp = rpcError(
-        null,
-        -32029,
-        "rate limit exceeded — try again in a minute",
-      );
       return withCors(
-        new Response(errResp.body, {
-          status: 429,
-          headers: { ...errResp.headers, "retry-after": "60" },
-        }),
+        Response.json(
+          {
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32029, message: "rate limit exceeded — try again in a minute" },
+          },
+          { status: 429, headers: { "retry-after": "60" } },
+        ),
         origin,
       );
     }
 
     const id = env.TASK_RUNNER.idFromName(SINGLETON_NAME);
     const stub = env.TASK_RUNNER.get(id);
-    // Forward the body to the DO; the DO does its own JSON-RPC
-    // dispatch + storage. We reconstruct the request because the
-    // original body has already been consumed if anything along the
-    // way read it (currently nothing does, but explicit > implicit).
+    // Forward the body (and the version header the DO negotiates on).
     const bodyText = await req.text();
+    const doHeaders: Record<string, string> = {
+      "content-type": "application/json",
+    };
+    const a2aVersion = req.headers.get("a2a-version");
+    if (a2aVersion) doHeaders["a2a-version"] = a2aVersion;
     const doResp = await stub.fetch("https://do.local/", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: doHeaders,
       body: bodyText,
     });
     return withCors(doResp, origin);

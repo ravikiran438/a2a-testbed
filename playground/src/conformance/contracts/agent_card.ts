@@ -3,8 +3,12 @@
 // `/.well-known/agent-card.json` — they don't exercise any wire
 // behavior beyond the GET. Each maps to the Python contract module
 // of the same name; spec citations align so reports compare
-// apples-to-apples across surfaces.
+// apples-to-apples across surfaces. Checks that read 1.0 field names
+// (supportedInterfaces, …) evaluate A2A 0.3 cards in the 1.0 layout
+// (see `cardToV10`), as the Python side does with the a2a-sdk compat
+// converter.
 
+import { cardIsV03, cardToV10 } from '../dialect';
 import { assert, fetchCard } from '../transport';
 import type { Contract } from '../types';
 
@@ -50,7 +54,7 @@ export const agentCardRequiredFields: Contract = {
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
     assert(body && typeof body === 'object', 'card is not an object');
-    const card = body as Record<string, unknown>;
+    const card = cardToV10(body);
 
     for (const field of ['name', 'description', 'version']) {
       const v = card[field];
@@ -162,7 +166,7 @@ export const agentCardSupportedInterfaces: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
+    const interfaces = cardToV10(body).supportedInterfaces;
     assert(Array.isArray(interfaces), 'supportedInterfaces MUST be an array');
     interfaces.forEach((entry, i) => {
       assert(entry && typeof entry === 'object', `supportedInterfaces[${i}] MUST be an object`);
@@ -183,7 +187,7 @@ export const agentCardPreferredInterface: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
+    const interfaces = cardToV10(body).supportedInterfaces;
     assert(
       Array.isArray(interfaces) && interfaces.length > 0,
       'supportedInterfaces MUST be a non-empty array',
@@ -207,7 +211,7 @@ export const agentCardUrlWellFormed: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const card = body as Record<string, unknown>;
+    const card = cardToV10(body);
     const offenders: string[] = [];
     for (const f of ['url', 'documentationUrl', 'iconUrl']) {
       const v = card[f];
@@ -239,7 +243,7 @@ export const agentCardHttpsUrls: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
-    const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
+    const interfaces = cardToV10(body).supportedInterfaces;
     if (!Array.isArray(interfaces)) return;
     const offenders: string[] = [];
     interfaces.forEach((entry, i) => {
@@ -264,10 +268,20 @@ export const agentCardHttpsUrls: Contract = {
   },
 };
 
+// A2A 1.0 SecurityScheme oneof members; 0.3 used OpenAPI `type` values.
+const V10_SCHEME_KEYS = new Set([
+  'apiKeySecurityScheme',
+  'httpAuthSecurityScheme',
+  'oauth2SecurityScheme',
+  'openIdConnectSecurityScheme',
+  'mtlsSecurityScheme',
+]);
+const V03_SCHEME_TYPES = new Set(['apiKey', 'http', 'oauth2', 'openIdConnect', 'mutualTLS']);
+
 export const agentCardSecuritySchemes: Contract = {
   id: 'transport.agent_card_security_schemes',
   specSection: '§7.3',
-  description: 'Declared securitySchemes use recognized OpenAPI types.',
+  description: 'Declared securitySchemes use recognized types (1.0 oneof / 0.3 OpenAPI).',
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
@@ -277,15 +291,26 @@ export const agentCardSecuritySchemes: Contract = {
       typeof schemes === 'object' && !Array.isArray(schemes),
       'securitySchemes MUST be an object keyed by scheme name',
     );
-    const recognized = new Set(['apiKey', 'http', 'oauth2', 'openIdConnect', 'mutualTLS']);
+    const legacy = cardIsV03(body);
     for (const [name, spec] of Object.entries(schemes as Record<string, unknown>)) {
       assert(
         spec && typeof spec === 'object',
         `securitySchemes[${JSON.stringify(name)}] MUST be an object`,
       );
+      if (!legacy) {
+        const keys = Object.keys(spec as Record<string, unknown>);
+        const members = keys.filter((k) => V10_SCHEME_KEYS.has(k));
+        assert(
+          members.length === 1,
+          `securitySchemes[${JSON.stringify(name)}] MUST carry exactly one of ` +
+            `${[...V10_SCHEME_KEYS].join(', ')} (A2A 1.0 SecurityScheme oneof); got keys ${keys}` +
+            (keys.includes('type') ? ' — `type` is the A2A 0.3 / OpenAPI form' : ''),
+        );
+        continue;
+      }
       const kind = (spec as { type?: unknown }).type;
       assert(
-        typeof kind === 'string' && recognized.has(kind),
+        typeof kind === 'string' && V03_SCHEME_TYPES.has(kind),
         `securitySchemes[${JSON.stringify(name)}].type ${JSON.stringify(kind)} is not a recognized OpenAPI scheme`,
       );
     }
@@ -447,6 +472,11 @@ export const agentCardProtocolVersionFormat: Contract = {
   category: 'transport',
   async verify(agentUrl) {
     const { body } = await fetchCard(agentUrl);
+    if (cardIsV03(body)) {
+      // 0.3 predates the Major.Minor rule; its cards carried a full
+      // semver protocolVersion (e.g. "0.3.0").
+      return "skipped — A2A 0.3 AgentCard; the Major.Minor rule is 1.0's (§3.6)";
+    }
     const interfaces = (body as { supportedInterfaces?: unknown }).supportedInterfaces;
     if (!Array.isArray(interfaces)) return;
     const offenders: string[] = [];

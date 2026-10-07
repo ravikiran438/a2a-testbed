@@ -9,25 +9,25 @@ design choices that distinguish it from existing A2A tooling.
 ┌───────────────────────────────────────────────────────────────┐
 │  CLI (typer)                                                  │
 │  Reads YAML, drives the runner, prints + writes reports.      │
-└─────────────────┬─────────────────────────────────────────────┘
-                  │
-┌─────────────────▼─────────────────────────────────────────────┐
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+┌───────────────────────────────▼───────────────────────────────┐
 │  ScenarioRunner                                               │
 │  Loads scenario YAML, builds runtimes, boots the network,     │
 │  drives the flow step-by-step, applies faults, evaluates      │
 │  expectations, records observer history.                      │
-└─┬─────────────────┬───────────────────────┬───────────────────┘
-  │                 │                       │
-  ▼                 ▼                       ▼
-┌────────┐   ┌──────────────────┐   ┌─────────────────────┐
-│ Loader │   │ Network          │   │ Runtimes            │
-│ AgentCard JSON │ ↳ MultiTenant │   │ ↳ python_inproc    │
-│ → protobuf     │   (sim mode)  │   │ ↳ python_subproc   │
-│ → validated.   │ ↳ PerProcess  │   │ ↳ go               │
-│                │   (realistic) │   │ ↳ nodejs           │
-└────────────────┘                  │ ↳ java              │
-                                     │ ↳ external          │
-                                     └─────────────────────┘
+└─────────┬─────────────────────┬─────────────────────┬─────────┘
+          │                     │                     │
+          ▼                     ▼                     ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│ Loader            │ │ Network           │ │ Runtimes          │
+│ AgentCard JSON    │ │ ↳ MultiTenant     │ │ ↳ python_inproc   │
+│ → protobuf        │ │   (sim mode)      │ │ ↳ python_subproc  │
+│ → validated       │ │ ↳ PerProcess      │ │ ↳ go              │
+│ (1.0 or 0.3 card) │ │   (realistic)     │ │ ↳ nodejs          │
+│                   │ │                   │ │ ↳ java            │
+│                   │ │                   │ │ ↳ external        │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
 ```
 
 ### Layer 1: Loader (`core/loader.py`)
@@ -35,6 +35,11 @@ design choices that distinguish it from existing A2A tooling.
 Reads JSON, validates against the official `a2a.types.AgentCard` proto
 schema (via `google.protobuf.json_format.Parse`). Surfaces clear
 errors for schema mismatch, JSON syntax errors, and missing files.
+A2A 0.3 cards (top-level `url` / `protocolVersion` /
+`preferredTransport`) are validated against the a2a-sdk's 0.3 model and
+converted with its compat layer (`a2a.compat.v0_3`); the converted
+interfaces keep their 0.x `protocolVersion`, which is how the rest of
+the testbed knows to speak 0.3 to that agent.
 
 The loader is **deliberately minimal**: no extension-specific
 knowledge. Extensions are validated at the conformance-contract
@@ -124,23 +129,57 @@ chain is complete and sealed."
 
 ## Wire protocol details
 
+### Protocol versions (`transport/dialect.py`)
+
+A2A 1.0 renamed every JSON-RPC method (`message/send` → `SendMessage`,
+`tasks/resubscribe` → `SubscribeToTask`, …), moved payloads to the
+ProtoJSON rendering of `a2a.proto` (oneof Parts without `kind`,
+`ROLE_*` / `TASK_STATE_*` enums, `{"task": …}` / `{"message": …}` send
+results, JSON-RPC-wrapped `StreamResponse` SSE frames) and introduced
+the `A2A-Version` header (absent = 0.3, §3.6.2). `dialect.py` holds the
+two method tables, request builders, and the 0.3 → 1.0 normalizers;
+`playground/src/conformance/dialect.ts` mirrors it for the browser
+(the parity test checks the tables).
+
+- **Client side** (scenario runner, contracts): the wire version is
+  negotiated per agent from its AgentCard — 1.0 unless the card is a
+  0.3 card or lists only 0.x JSONRPC interfaces (§3.6.3 discourages
+  silent fallback, so 1.0 wins any ambiguity). Contracts check one
+  canonical shape: 0.3 payloads are normalized to 1.0 first, 1.0
+  payloads never are, so genuine 1.0 violations surface. A scenario
+  step whose 1.0 request gets MethodNotFound is retried in 0.3 and the
+  step detail says so; the conformance sweep instead fails
+  `transport.advertised_version_served`.
+- **Server side** (in-process agents, subprocess templates, hosted
+  workers): every request is answered in the dialect it was made in. A
+  1.0-card agent serves both versions on one endpoint (1.0 methods
+  require `A2A-Version: 1.x`); a 0.3-card agent serves only 0.3, like
+  a real pre-1.0 deployment.
+
+### In-process network shim
+
 The testbed's **in-process multi-tenant network shim** (the HTTP
 server `multitenant.py` boots when a scenario uses sim mode with
-`runtime: python_inproc` agents) currently exposes:
+`runtime: python_inproc` agents) exposes:
 
-- `GET /agents/<id>/.well-known/agent-card.json` → AgentCard JSON
-- `POST /agents/<id>/a2a/v1/` → JSON-RPC `message/send`
+- `GET /agents/<id>/.well-known/agent-card.json` → AgentCard JSON (in
+  the card's own version layout)
+- `POST /agents/<id>/a2a/v1/` → JSON-RPC `SendMessage` (1.0) /
+  `message/send` (0.3), replying with a Message
 
-Other A2A surface area (streaming, multi-turn, push notifications,
-extended cards) is on the roadmap **for the in-process shim**. This
-scope limit applies only to scenarios that route through the
-testbed's own server; the conformance contract suite probes
-streaming / subscribe / push against any external agent that
-advertises the matching capability, and the reference task-runner
+In-process agents are message-only: task lookups return
+TaskNotFound, `ListTasks` an empty page, and streaming / push /
+extended-card methods the capability errors the spec mandates when
+the card doesn't advertise them (§3.3.4). This scope limit applies
+only to scenarios that route through the testbed's own server; the
+conformance contract suite probes streaming / subscribe / push
+against any external agent that advertises the matching capability,
+and the reference task-runner
 ([`examples/hosted-agents/cloudflare-task-runner/`](examples/hosted-agents/cloudflare-task-runner/))
-implements every spec surface the contracts probe. The minimal
-in-process scope is deliberate: it's enough for protocol-extension
-scenario testing and keeps the in-process codebase auditable.
+implements every spec surface the contracts probe, in both versions.
+The minimal in-process scope is deliberate: it's enough for
+protocol-extension scenario testing and keeps the in-process codebase
+auditable.
 
 ## What we deliberately don't do
 
@@ -312,18 +351,28 @@ pattern: each first probes whether the agent advertises the
 matching capability or produces the relevant envelope; if not,
 the contract reports a "skipped" detail and passes. The same
 contract suite therefore runs cleanly against agents that
-support the full surface AND agents that only do `message/send`.
+support the full surface AND agents that only do `SendMessage`.
+
+Every contract probes in the agent's own protocol version (see
+*Protocol versions* above). Rules that only exist in 1.0 — the
+Major.Minor `protocolVersion` format, `A2A-Version` negotiation,
+typed `error.data` — skip for 0.3 agents; everything else applies to
+both. The suite is validated against oracle agents built on the
+official a2a-sdk in both versions (`tests/oracles/sdk_agents.py`,
+`tests/integration/test_protocol_versions.py`).
 
 ### Reference task runner
 
 The `examples/hosted-agents/cloudflare-task-runner/` worker is a
-spec-compliant A2A 1.0 reference agent — it implements every
-method the contracts probe (message/send + message/stream,
-tasks/get/list/cancel/resubscribe, all four
-pushNotificationConfig methods) plus genuine async semantics
-(`configuration.blocking: false` schedules work via
-`ctx.waitUntil` so clients can register push configs before
-completion). The companion `cloudflare-push-receiver/` worker
+spec-compliant A2A 1.0 reference agent that also serves A2A 0.3 on
+the same URL — it implements every method the contracts probe
+(SendMessage + SendStreamingMessage, GetTask / ListTasks /
+CancelTask / SubscribeToTask, all four push-config methods, and their
+0.3 equivalents) plus genuine async semantics
+(`configuration.returnImmediately: true` — 0.3 `blocking: false` —
+schedules work via `ctx.waitUntil` so clients can register push
+configs before completion). `sdk_interop_check.py` drives it with
+both official a2a-sdk clients (1.0 and the SDK's 0.3 compat client). The companion `cloudflare-push-receiver/` worker
 captures incoming webhooks per probe-token so the
 `push_fires_on_completion` contract can verify delivery
 end-to-end. Together they exist for one purpose: the contract

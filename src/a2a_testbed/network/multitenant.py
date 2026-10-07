@@ -37,7 +37,6 @@ from starlette.routing import Route
 from a2a_testbed.runtimes.python_inproc import PythonInProcRuntime
 from a2a_testbed.transport import A2ATransport, Transport
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +99,7 @@ class MultiTenantNetwork:
     async def start(self) -> None:
         try:
             from sse_starlette.sse import AppStatus
+
             AppStatus.should_exit = False
             AppStatus.disable_automatic_graceful_drain()
         except ImportError:
@@ -109,9 +109,7 @@ class MultiTenantNetwork:
         rpc_path = self._transport.rpc_endpoint_path()
         for runtime in self._runtimes.values():
             base_url = self.url_of(runtime.agent_id)
-            live_card = self._fix_card_url(
-                runtime.agent_card, base_url + rpc_path
-            )
+            live_card = self._fix_card_url(runtime.agent_card, base_url + rpc_path)
             runtime.attach(base_url, live_card)
             await runtime.start()
 
@@ -208,6 +206,7 @@ class MultiTenantNetwork:
             runtime = self._runtimes[agent_id]
             payload = self._transport.serialize_card(runtime.agent_card)
             return JSONResponse(payload)
+
         return handler
 
     def _make_rpc_handler(self, agent_id: str):
@@ -217,55 +216,15 @@ class MultiTenantNetwork:
             try:
                 body = await request.json()
             except json.JSONDecodeError:
-                error_payload = self._transport.build_error_response(
-                    {}, -32700, "parse error"
-                )
+                error_payload = self._transport.build_error_response({}, -32700, "parse error")
                 return JSONResponse(error_payload, status_code=400)
 
-            method = body.get("method") if isinstance(body, dict) else None
-
-            # Only message/send is currently implemented; other A2A
-            # methods (streaming, push notifications, extended cards)
-            # are not exercised by sim-mode networks. Unknown methods
-            # MUST return -32601 per JSON-RPC 2.0 §5.1.
-            if method != "message/send":
-                error_payload = self._transport.build_error_response(
-                    body, -32601, f"method not implemented: {method!r}"
-                )
-                for tap in self._traffic_taps:
-                    try:
-                        tap(agent_id, body, error_payload)
-                    except Exception:
-                        logger.exception("traffic tap raised; continuing")
-                return JSONResponse(error_payload)
-
-            # Spec §3.1.1: message MUST have role, messageId, and ≥1 part.
-            params = body.get("params") if isinstance(body, dict) else None
-            message = params.get("message") if isinstance(params, dict) else None
-            valid = (
-                isinstance(message, dict)
-                and message.get("role")
-                and message.get("messageId")
-                and isinstance(message.get("parts"), list)
-                and len(message["parts"]) > 0
-            )
-            if not valid:
-                error_payload = self._transport.build_error_response(
-                    body,
-                    -32602,
-                    "invalid params: message MUST have role, messageId, and ≥1 part (A2A 1.0 §3.1.1)",
-                )
-                for tap in self._traffic_taps:
-                    try:
-                        tap(agent_id, body, error_payload)
-                    except Exception:
-                        logger.exception("traffic tap raised; continuing")
-                return JSONResponse(error_payload)
-
-            text = self._transport.extract_text_for_scripting(body)
-            scripted = runtime.script_for(text)
-            response_payload = self._transport.build_response(
-                body, agent_id, scripted
+            response_payload = self._transport.handle_rpc(
+                body,
+                request.headers,
+                runtime.agent_card,
+                runtime.script_for,
+                agent_id,
             )
 
             for tap in self._traffic_taps:
@@ -283,15 +242,18 @@ class MultiTenantNetwork:
         """Set the agent card's bound URL to the actual rpc endpoint.
 
         Done generically: we serialize through the transport, mutate
-        the supportedInterfaces[0].url field if present, and parse
-        back. The transport-specific bits are isolated to the load /
+        every supportedInterfaces[*].url (all are served from the same
+        endpoint), and parse back. The transport-specific bits are isolated to the load /
         serialize calls.
         """
         from a2a.types import AgentCard
         from google.protobuf.json_format import MessageToJson, Parse
+
         clone = Parse(MessageToJson(card_payload), AgentCard())
-        if clone.supported_interfaces:
-            clone.supported_interfaces[0].url = full_rpc_url
+        # Every interface is served from the same in-process endpoint
+        # (e.g. a 1.0 and a 0.3 JSONRPC interface on one URL).
+        for iface in clone.supported_interfaces:
+            iface.url = full_rpc_url
         return clone
 
     async def _wait_until_ready(self) -> None:

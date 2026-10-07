@@ -30,7 +30,6 @@ from a2a_testbed.acs.evaluator import _OPS
 from a2a_testbed.acs.manifest import AcsFindingKind
 from a2a_testbed.acs.types import Decision, InterventionPoint
 
-
 REPO = Path(__file__).resolve().parents[1]
 PG = REPO / "playground" / "src"
 PY_TRANSPORT = REPO / "src" / "a2a_testbed" / "contracts" / "transport"
@@ -127,3 +126,48 @@ def test_transport_contract_ids_parity():
     assert ts_ids == py_ids, (
         f"transport-contract drift: TS-only={ts_ids - py_ids}, PY-only={py_ids - ts_ids}"
     )
+
+
+def test_contract_order_parity():
+    """Both surfaces run the same contracts in the same order."""
+    from a2a_testbed.contracts.runner import transport_contracts
+    from a2a_testbed.transport import A2ATransport
+
+    py_order = [c.id for c in transport_contracts(A2ATransport(), "http://x")]
+    index = (TS_CONFORMANCE / "index.ts").read_text(encoding="utf-8")
+    registry = _between(index, "export const ALL_CONTRACTS: Contract[] = [", "];")
+    names = re.findall(r"^\s+([A-Za-z0-9]+),", registry, flags=re.MULTILINE)
+    by_name: dict[str, str] = {}
+    for path in TS_CONFORMANCE.glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        for name, cid in re.findall(
+            r"export const (\w+): Contract = \{\s*id: '(transport\.[a-z0-9_]+)'", text
+        ):
+            by_name[name] = cid
+    ts_order = [by_name[n] for n in names]
+    assert ts_order == py_order
+
+
+# ---------------------------------------------------------------------------
+# A2A protocol-version (dialect) parity
+# ---------------------------------------------------------------------------
+
+
+def test_dialect_method_tables_parity():
+    """dialect.ts METHODS mirrors dialect.py METHODS (1.0 and 0.3)."""
+    from a2a_testbed.transport.dialect import METHODS
+
+    ts = (PG / "conformance" / "dialect.ts").read_text(encoding="utf-8")
+    for version, ops in METHODS.items():
+        block = _between(ts, f"'{version.value}': {{", "},")
+        ts_ops = dict(re.findall(r"(\w+): '([^']+)'", block))
+        assert ts_ops == ops, f"A2A {version.value} method-table drift: TS={ts_ops} PY={ops}"
+
+
+def test_dialect_state_map_parity():
+    from a2a_testbed.transport.dialect import _STATE_V03_TO_V10
+
+    ts = (PG / "conformance" / "dialect.ts").read_text(encoding="utf-8")
+    block = _between(ts, "const STATE_V03: Record<string, string> = {", "};")
+    ts_map = dict(re.findall(r"'?([a-z-]+)'?: '(TASK_STATE_[A-Z_]+)'", block))
+    assert ts_map == _STATE_V03_TO_V10

@@ -2,8 +2,9 @@
 // timestamps with 'Z' suffix. Both walk the response tree, so we
 // share a tiny helper.
 
-import { assert, buildMessageSendParams, fetchCard, jsonRpcCall } from '../transport';
+import { assert, fetchCard, jsonRpcCall } from '../transport';
 import type { Contract } from '../types';
+import { AgentProbe } from './_probe';
 
 function walkStrings(node: unknown, path: string, out: Array<[string, string]>): void {
   if (node && typeof node === 'object') {
@@ -38,14 +39,16 @@ export const jsonCamelCase: Contract = {
   description: 'JSON field names use camelCase, not snake_case.',
   category: 'transport',
   async verify(agentUrl) {
-    // Walk both the AgentCard and a message/send response — most A2A
-    // agents emit different fields in each.
+    // Walk both the AgentCard and a send response — most A2A agents
+    // emit different fields in each.
     const { body: card } = await fetchCard(agentUrl);
+    const probe = await AgentProbe.create(agentUrl);
     const { body: rpcResp } = await jsonRpcCall(
       agentUrl,
-      'message/send',
-      buildMessageSendParams('camel-case-probe'),
+      probe.method('send'),
+      probe.sendParams('camel-case-probe'),
       'camel-1',
+      probe.headers(),
     );
     const offenders: string[] = [];
     const collectKeys = (root: unknown, label: string) => {
@@ -73,11 +76,13 @@ export const iso8601Timestamps: Contract = {
   description: "Response timestamps end with 'Z' (UTC).",
   category: 'transport',
   async verify(agentUrl) {
+    const probe = await AgentProbe.create(agentUrl);
     const { body } = await jsonRpcCall(
       agentUrl,
-      'message/send',
-      buildMessageSendParams('iso8601-probe'),
+      probe.method('send'),
+      probe.sendParams('iso8601-probe'),
       'iso-1',
+      probe.headers(),
     );
     if (!body) return;
     const strings: Array<[string, string]> = [];

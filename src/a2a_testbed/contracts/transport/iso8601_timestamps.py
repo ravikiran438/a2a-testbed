@@ -3,14 +3,14 @@
 
 """Transport contract: response timestamps are ISO 8601 UTC with 'Z' suffix.
 
-  Spec:    A2A 1.0 §5.6.1 (Timestamps)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Timestamps MUST NOT include timezone offsets other than 'Z'
-           (all times are UTC). The on-the-wire form is therefore an
-           RFC 3339 / ISO 8601 string ending in 'Z':
-           ``2026-04-23T13:54:31Z`` or ``2026-04-23T13:54:31.123Z``.
-           Numeric epoch values, naive timestamps, and offset suffixes
-           (``+05:30``, ``-08:00``) are non-conformant.
+Spec:    A2A 1.0 §5.6.1 (Timestamps)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Timestamps MUST NOT include timezone offsets other than 'Z'
+         (all times are UTC). The on-the-wire form is therefore an
+         RFC 3339 / ISO 8601 string ending in 'Z':
+         ``2026-04-23T13:54:31Z`` or ``2026-04-23T13:54:31.123Z``.
+         Numeric epoch values, naive timestamps, and offset suffixes
+         (``+05:30``, ``-08:00``) are non-conformant.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ import re
 import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.transport._task_helpers import AgentProbe
 from a2a_testbed.transport import Transport, WireMessage
-
 
 # Heuristic: anything that starts with YYYY-MM-DDThh:mm we treat as a
 # timestamp candidate. Forces a Z suffix (after optional fractional
@@ -50,9 +50,7 @@ def _walk_strings(node: object) -> list[tuple[str, str]]:
     return out
 
 
-def make_iso8601_timestamps_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_iso8601_timestamps_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> None:
         # Drive a vanilla send; whatever the agent emits (Message or
         # Task) gets walked for timestamp-looking strings.
@@ -64,11 +62,10 @@ def make_iso8601_timestamps_contract(
             text="iso8601-probe",
             metadata={"request_id": "contract", "message_id": "contract"},
         )
-        payload = transport.encode_request(wire)
+        probe = await AgentProbe.create(transport, agent_url)
+        payload = transport.encode_request(wire, protocol_version=probe.dialect.value)
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                rpc_url, json=payload, headers={"content-type": "application/json"}
-            )
+            resp = await client.post(rpc_url, json=payload, headers=probe.headers())
         # Even error responses ship JSON-RPC envelopes; we walk the body
         # regardless of status code to catch error.data timestamps.
         try:
@@ -90,9 +87,7 @@ def make_iso8601_timestamps_contract(
 
     return Contract(
         id="transport.iso8601_timestamps",
-        description=(
-            "Response timestamps end with 'Z' (UTC) per A2A 1.0 §5.6.1"
-        ),
+        description=("Response timestamps end with 'Z' (UTC) per A2A 1.0 §5.6.1"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

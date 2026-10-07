@@ -15,7 +15,6 @@ from rich.table import Table
 from a2a_testbed.reporter import write_reports
 from a2a_testbed.scenario import run_scenario_file
 
-
 app = typer.Typer(
     name="a2a-testbed",
     no_args_is_help=True,
@@ -278,6 +277,7 @@ def compat_cmd(
     heuristic guesses.
     """
     import json
+
     from a2a_testbed.vendors import (
         DIALECTS,
         Dialect,
@@ -734,6 +734,7 @@ def manifest_spec_cmd(
     from code.
     """
     import json
+
     from a2a_testbed.manifest import ExtensionManifest, render_spec_md
 
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -782,6 +783,7 @@ def manifest_validate_cmd(
     manifests; catches drift between the JSON and the envelope shape.
     """
     import json
+
     from a2a_testbed.manifest import ExtensionManifest
 
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -823,9 +825,9 @@ def contracts_cmd(
 
         scenario_obj = load_scenario(scenario)
         scenario_dir = scenario.parent
+        from a2a_testbed.core.loader import load_agent_card_from_path
         from a2a_testbed.network.multitenant import MultiTenantNetwork
         from a2a_testbed.runtimes.python_inproc import PythonInProcRuntime
-        from a2a_testbed.core.loader import load_agent_card_from_path
         from a2a_testbed.scenario import scripts_from_steps
 
         scripts = scripts_from_steps(scenario_obj.flow)
@@ -897,14 +899,30 @@ def conformance_cmd(
             "those soft passes still surface in the detail column."
         ),
     ),
+    protocol_version: str | None = typer.Option(
+        None,
+        "--protocol-version",
+        help=(
+            "A2A version to probe with: '1.0' or '0.3'. Default: the version "
+            "the agent's card advertises (1.0 when it lists a 1.x JSONRPC "
+            "interface). Use '0.3' to sweep the legacy surface of an agent "
+            "that serves both."
+        ),
+    ),
 ) -> None:
-    """Run the full A2A 1.0 transport-contract sweep against a deployed agent.
+    """Run the full A2A transport-contract sweep against a deployed agent.
 
     Standalone counterpart to ``run``: takes a URL, fetches the
     AgentCard, and exercises every spec-derived transport contract
-    (~23 probes) against the live deployment. Prints a per-row table
-    with the spec section each contract enforces and exits non-zero
-    if any contract fails.
+    against the live deployment. Prints a per-row table with the spec
+    section each contract enforces and exits non-zero if any contract
+    fails.
+
+    The agent is probed in the protocol version its card advertises:
+    A2A 1.0 (``SendMessage``, ``A2A-Version: 1.0``) by default, A2A 0.3
+    (``message/send``) for 0.3 cards. 0.3 payloads are normalized to
+    the 1.0 shape before checks; rules that only exist in 1.0 are
+    skipped for 0.3 agents.
 
     Use this for your own deployed agents — Cloudflare Workers,
     AWS Lambda, GKE, anywhere — to confirm conformance before
@@ -916,9 +934,22 @@ def conformance_cmd(
     from a2a_testbed.spec_meta import load_spec_meta
     from a2a_testbed.transport import A2ATransport
 
-    transport = A2ATransport()
+    try:
+        transport = A2ATransport(protocol_version=protocol_version)
+    except ValueError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=2) from exc
 
     async def _run() -> int:
+        from a2a_testbed.contracts.transport._task_helpers import AgentProbe
+
+        probe = await AgentProbe.create(transport, agent_url)
+        source = "pinned" if protocol_version else "from the AgentCard"
+        console.print(
+            f"Probing with A2A {probe.dialect.value} ({source}): "
+            f"{probe.method('send')}"
+            + (", no A2A-Version header" if probe.is_legacy else ", A2A-Version: 1.0")
+        )
         try:
             results = await run_transport_contracts(transport, agent_url)
         except Exception as exc:  # pragma: no cover - defensive

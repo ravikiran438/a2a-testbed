@@ -3,15 +3,15 @@
 
 """Transport contract: production interface URLs use encrypted transport.
 
-  Spec:    A2A 1.0 §7.1 (Transport-Level Security)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Production deployments MUST use encrypted communication
-           (HTTPS for HTTP-based bindings, TLS for gRPC). For A2A
-           bindings JSONRPC and REST this means each
-           ``supportedInterfaces[*].url`` starts with ``https://``;
-           gRPC bindings declare TLS via the binding's own URL scheme.
-           Localhost / 127.0.0.1 / ::1 development URLs are exempt;
-           the contract treats them as non-production.
+Spec:    A2A 1.0 §7.1 (Transport-Level Security)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Production deployments MUST use encrypted communication
+         (HTTPS for HTTP-based bindings, TLS for gRPC). For A2A
+         bindings JSONRPC and REST this means each
+         ``supportedInterfaces[*].url`` starts with ``https://``;
+         gRPC bindings declare TLS via the binding's own URL scheme.
+         Localhost / 127.0.0.1 / ::1 development URLs are exempt;
+         the contract treats them as non-production.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.transport import Transport
-
+from a2a_testbed.transport.dialect import card_to_v10_json
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
@@ -37,16 +37,14 @@ def _is_local(url: str) -> bool:
     return host in _LOCAL_HOSTS
 
 
-def make_agent_card_https_urls_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_agent_card_https_urls_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> None:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                agent_url.rstrip("/") + transport.card_endpoint_path()
-            )
+            resp = await client.get(agent_url.rstrip("/") + transport.card_endpoint_path())
         assert resp.status_code == 200
-        body = json.loads(resp.text)
+        # 0.3 cards (top-level url / preferredTransport) are checked in the
+        # 1.0 layout, converted by the a2a-sdk compat layer.
+        body = card_to_v10_json(json.loads(resp.text))
         interfaces = body.get("supportedInterfaces") or []
         if not isinstance(interfaces, list):
             return  # caught by the supported_interfaces shape contract
@@ -74,9 +72,7 @@ def make_agent_card_https_urls_contract(
 
     return Contract(
         id="transport.agent_card_https_urls",
-        description=(
-            "Non-loopback supportedInterfaces URLs use HTTPS/WSS per §7.1"
-        ),
+        description=("Non-loopback supportedInterfaces URLs use HTTPS/WSS per §7.1"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

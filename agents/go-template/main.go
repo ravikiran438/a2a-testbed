@@ -5,8 +5,12 @@
 //
 // Reads CLI args --agent-card, --scripts, --port; binds an HTTP
 // server on 127.0.0.1; serves the AgentCard at the well-known URL and
-// a minimal JSON-RPC message/send endpoint. Prints
+// a minimal JSON-RPC send endpoint. Prints
 // "A2A_TESTBED_READY: <url>" on stdout when listening.
+//
+// Speaks A2A 1.0 (SendMessage with A2A-Version: 1.0; replies
+// {"message": {...}} with ROLE_AGENT and oneof parts) and still answers
+// A2A 0.3 callers (message/send; bare Message with kind discriminators).
 //
 // Uses stdlib net/http only. Real production Go agents would swap to
 // github.com/a2aproject/a2a-go for full A2A compliance.
@@ -20,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -97,21 +102,35 @@ func main() {
 			writeJSONRPCError(w, nil, -32700, "parse error")
 			return
 		}
-		if req.Method != "message/send" {
+		if req.Method != "SendMessage" && req.Method != "message/send" {
 			writeJSONRPCError(w, req.ID, -32601, fmt.Sprintf("unknown method %q", req.Method))
+			return
+		}
+		if req.Method == "SendMessage" && !requestsV1(r.Header.Get("A2A-Version")) {
+			// A2A 1.0 §3.6.2: an absent header means 0.3, which has no SendMessage.
+			writeJSONRPCError(w, req.ID, -32009, "SendMessage requires A2A-Version: 1.0")
 			return
 		}
 		var params sendParams
 		_ = json.Unmarshal(req.Params, &params)
 		text := extractText(params)
-		response := matchScript(text, scripts)
+		reply := fmt.Sprintf("[%s] %s", agentID, matchScript(text, scripts))
+		messageID := fmt.Sprintf("resp-%v", req.ID)
+		if req.Method == "SendMessage" {
+			writeJSONRPC(w, req.ID, map[string]any{
+				"message": map[string]any{
+					"messageId": messageID,
+					"role":      "ROLE_AGENT",
+					"parts":     []map[string]any{{"text": reply}},
+				},
+			})
+			return
+		}
 		writeJSONRPC(w, req.ID, map[string]any{
 			"kind":      "message",
-			"messageId": fmt.Sprintf("resp-%v", req.ID),
-			"role":      "assistant",
-			"parts": []map[string]any{
-				{"kind": "text", "text": fmt.Sprintf("[%s] %s", agentID, response)},
-			},
+			"messageId": messageID,
+			"role":      "agent",
+			"parts":     []map[string]any{{"kind": "text", "text": reply}},
 		})
 	})
 
@@ -128,6 +147,19 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// requestsV1 reports whether an A2A-Version header value names a 1.x
+// version (comma-separated values allowed; an absent header means 0.3).
+func requestsV1(header string) bool {
+	for _, v := range strings.Split(header, ",") {
+		if v1Version.MatchString(strings.TrimSpace(v)) {
+			return true
+		}
+	}
+	return false
+}
+
+var v1Version = regexp.MustCompile(`^1(\.\d+)*$`)
 
 func extractText(p sendParams) string {
 	chunks := []string{}

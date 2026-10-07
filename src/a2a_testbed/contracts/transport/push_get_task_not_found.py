@@ -3,10 +3,10 @@
 
 """Transport contract: pushNotificationConfig/get on unknown taskId fails.
 
-  Spec:    A2A 1.0 §3.1.8 (GetTaskPushNotificationConfig), §9.5
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Fetching a push config for a non-existent taskId MUST
-           return ``TaskNotFoundError`` (-32001).
+Spec:    A2A 1.0 §3.1.8 (GetTaskPushNotificationConfig), §9.5
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Fetching a push config for a non-existent taskId MUST
+         return ``TaskNotFoundError`` (-32001).
 """
 
 from __future__ import annotations
@@ -15,32 +15,29 @@ import uuid
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.contracts.transport._task_helpers import (
+    METHOD_NOT_FOUND_CODE,
     TASK_NOT_FOUND_CODE,
-    call_method,
-    fetch_card,
+    AgentProbe,
+    error_code,
     push_skip_detail,
 )
 from a2a_testbed.transport import Transport
+from a2a_testbed.transport.dialect import push_get_params
 
 
-def make_push_get_task_not_found_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_push_get_task_not_found_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
-        card = await fetch_card(transport, agent_url)
-        skip = push_skip_detail(card)
+        probe = await AgentProbe.create(transport, agent_url)
+        skip = push_skip_detail(probe.card)
         if skip:
             return skip
         bogus_task = str(uuid.uuid4())
         bogus_cfg = str(uuid.uuid4())
-        envelope = await call_method(
-            transport,
-            agent_url,
-            "tasks/pushNotificationConfig/get",
-            {"taskId": bogus_task, "pushNotificationConfigId": bogus_cfg},
+        envelope = await probe.call(
+            "push_get", push_get_params(probe.dialect, bogus_task, bogus_cfg)
         )
-        if "error" in envelope and envelope.get("error", {}).get("code") == -32601:
-            return "skipped — agent does not implement pushNotificationConfig/get"
+        if error_code(envelope) == METHOD_NOT_FOUND_CODE:
+            return f"skipped — agent does not implement {probe.method('push_get')} (-32601)"
         if "result" in envelope and envelope.get("error") is None:
             raise AssertionError(
                 f"get returned a result for bogus taskId {bogus_task!r}; "
@@ -58,9 +55,7 @@ def make_push_get_task_not_found_contract(
 
     return Contract(
         id="transport.push_get_task_not_found",
-        description=(
-            "pushNotificationConfig/get on unknown taskId returns -32001 (§3.1.8)"
-        ),
+        description=("pushNotificationConfig/get on unknown taskId returns -32001 (§3.1.8)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

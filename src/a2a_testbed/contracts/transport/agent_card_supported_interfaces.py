@@ -3,12 +3,12 @@
 
 """Transport contract: each AgentCard interface declares URL and protocol binding.
 
-  Spec:    A2A 1.0 §8.3.1 (Interface Declaration), §4.4.1 (AgentCard schema)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Each ``supportedInterfaces`` entry MUST declare a ``url``
-           and a ``protocolBinding`` (e.g., ``"JSONRPC"``, ``"GRPC"``,
-           ``"HTTP_JSON"``). Optional fields include ``protocolVersion``
-           and ``tenant``.
+Spec:    A2A 1.0 §8.3.1 (Interface Declaration), §4.4.1 (AgentCard schema)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Each ``supportedInterfaces`` entry MUST declare a ``url``
+         and a ``protocolBinding`` (e.g., ``"JSONRPC"``, ``"GRPC"``,
+         ``"HTTP_JSON"``). Optional fields include ``protocolVersion``
+         and ``tenant``.
 """
 
 from __future__ import annotations
@@ -19,37 +19,27 @@ import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.transport import Transport
-
+from a2a_testbed.transport.dialect import card_to_v10_json
 
 _KNOWN_BINDINGS = {"JSONRPC", "GRPC", "HTTP_JSON"}
 
 
-def make_agent_card_supported_interfaces_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_agent_card_supported_interfaces_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> None:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                agent_url.rstrip("/") + transport.card_endpoint_path()
-            )
+            resp = await client.get(agent_url.rstrip("/") + transport.card_endpoint_path())
         assert resp.status_code == 200
-        body = json.loads(resp.text)
+        # 0.3 cards (top-level url / preferredTransport) are checked in the
+        # 1.0 layout, converted by the a2a-sdk compat layer.
+        body = card_to_v10_json(json.loads(resp.text))
         interfaces = body.get("supportedInterfaces") or []
-        assert len(interfaces) >= 1, (
-            "supportedInterfaces MUST have at least one entry per §4.4.1"
-        )
+        assert len(interfaces) >= 1, "supportedInterfaces MUST have at least one entry per §4.4.1"
 
         for i, iface in enumerate(interfaces):
-            assert isinstance(iface, dict), (
-                f"supportedInterfaces[{i}] MUST be a JSON object"
-            )
-            assert iface.get("url"), (
-                f"supportedInterfaces[{i}].url is REQUIRED per §8.3.1"
-            )
+            assert isinstance(iface, dict), f"supportedInterfaces[{i}] MUST be a JSON object"
+            assert iface.get("url"), f"supportedInterfaces[{i}].url is REQUIRED per §8.3.1"
             binding = iface.get("protocolBinding")
-            assert binding, (
-                f"supportedInterfaces[{i}].protocolBinding is REQUIRED per §8.3.1"
-            )
+            assert binding, f"supportedInterfaces[{i}].protocolBinding is REQUIRED per §8.3.1"
             # Allow unknown bindings for forward-compatibility, but warn
             # against malformed values like 'http' or 'grpc' (lowercase).
             assert isinstance(binding, str) and binding == binding.upper(), (
@@ -60,8 +50,7 @@ def make_agent_card_supported_interfaces_contract(
     return Contract(
         id="transport.agent_card_supported_interfaces",
         description=(
-            "Every supportedInterfaces entry has url + protocolBinding "
-            "per A2A 1.0 §8.3.1"
+            "Every supportedInterfaces entry has url + protocolBinding per A2A 1.0 §8.3.1"
         ),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,

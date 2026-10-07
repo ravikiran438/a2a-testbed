@@ -3,51 +3,37 @@
 
 """Transport contract: SSE stream closes after a terminal-state event.
 
-  Spec:    A2A 1.0 §3.1.2 (Send Streaming Message), §4.1.3 (TaskState)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Once a Task reaches a terminal state (TASK_STATE_COMPLETED,
-           CANCELED, FAILED, or REJECTED), no further state changes
-           are possible — so the SSE stream closes after the
-           statusUpdate carrying the terminal state. Clients that
-           keep listening after a terminal state would block forever;
-           the spec's stream-close semantics are what unblocks them.
+Spec:    A2A 1.0 §3.1.2 (Send Streaming Message), §4.1.3 (TaskState)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Once a Task reaches a terminal state (TASK_STATE_COMPLETED,
+         CANCELED, FAILED, or REJECTED), no further state changes
+         are possible — so the SSE stream closes after the
+         statusUpdate carrying the terminal state. Clients that
+         keep listening after a terminal state would block forever;
+         the spec's stream-close semantics are what unblocks them.
 """
 
 from __future__ import annotations
 
-import uuid
-
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.contracts.transport._task_helpers import (
     TERMINAL_TASK_STATES,
-    fetch_card,
-    stream_sse_events,
+    AgentProbe,
     streaming_skip_detail,
 )
 from a2a_testbed.transport import Transport
 
 
-def make_streaming_terminal_state_closes_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_streaming_terminal_state_closes_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
-        card = await fetch_card(transport, agent_url)
-        skip = streaming_skip_detail(card)
+        probe = await AgentProbe.create(transport, agent_url)
+        skip = streaming_skip_detail(probe.card)
         if skip:
             return skip
-        events = await stream_sse_events(
-            transport,
-            agent_url,
-            "message/stream",
-            {
-                "message": {
-                    "messageId": str(uuid.uuid4()),
-                    "role": "user",
-                    "parts": [{"kind": "text", "text": "count: 1 terminal"}],
-                },
-            },
-        )
-        assert events, "message/stream emitted no SSE events"
+        events = await probe.stream("stream", probe.send_params("count: 1 terminal"))
+        assert events, f"{probe.method('stream')} emitted no SSE events"
+        if isinstance(events[0], dict) and "message" in events[0]:
+            return "skipped — message-only stream; no task lifecycle to close"
         # Find the last status update.
         last_status = None
         last_index = -1
@@ -56,8 +42,7 @@ def make_streaming_terminal_state_closes_contract(
                 last_status = ev["statusUpdate"]
                 last_index = i
         assert last_status is not None, (
-            "stream emitted no terminal statusUpdate event; client cannot "
-            "tell when the task ended"
+            "stream emitted no terminal statusUpdate event; client cannot tell when the task ended"
         )
         state = (last_status.get("status") or {}).get("state")
         assert state in TERMINAL_TASK_STATES, (
@@ -74,9 +59,7 @@ def make_streaming_terminal_state_closes_contract(
 
     return Contract(
         id="transport.streaming_terminal_state_closes",
-        description=(
-            "SSE stream closes after a terminal-state statusUpdate (§3.1.2 + §4.1.3)"
-        ),
+        description=("SSE stream closes after a terminal-state statusUpdate (§3.1.2 + §4.1.3)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

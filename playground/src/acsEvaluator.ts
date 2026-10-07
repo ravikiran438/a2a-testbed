@@ -305,18 +305,19 @@ export class AcsEvaluator {
 }
 
 /** Build the synthetic A2A request payload a playground step would send,
- *  matching the Python transport's encode_request shape so snapshots
- *  resolve identically. */
+ *  matching the Python transport's encode_request shape (A2A 1.0
+ *  `SendMessage`) so snapshots resolve identically. Paths like
+ *  `message.parts.0.text` are the same in 1.0 and 0.3. */
 export function stepRequestPayload(message: string): Record<string, unknown> {
   return {
     jsonrpc: '2.0',
-    method: 'message/send',
+    method: 'SendMessage',
     params: {
       message: {
-        role: 'user',
-        parts: [{ kind: 'text', text: message }],
+        role: 'ROLE_USER',
+        parts: [{ text: message }],
       },
-      configuration: { blocking: true },
+      configuration: { returnImmediately: false },
     },
   };
 }

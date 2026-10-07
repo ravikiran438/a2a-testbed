@@ -3,15 +3,15 @@
 
 """Transport contract: error.data entries carry @type per ProtoJSON.
 
-  Spec:    A2A 1.0 §3.3.2 (Error Handling)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  When a JSON-RPC error response carries ``error.data``, the
-           field is an array of typed objects. Each object MUST
-           include a ``@type`` key per the ProtoJSON ``Any``
-           representation (e.g. ``type.googleapis.com/lf.a2a.v1.X``).
-           Clients dispatch on ``@type`` to extract structured
-           context; missing ``@type`` keys leave clients unable to
-           parse the data and silently drop the diagnostic.
+Spec:    A2A 1.0 §3.3.2 (Error Handling)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  When a JSON-RPC error response carries ``error.data``, the
+         field is an array of typed objects. Each object MUST
+         include a ``@type`` key per the ProtoJSON ``Any``
+         representation (e.g. ``type.googleapis.com/lf.a2a.v1.X``).
+         Clients dispatch on ``@type`` to extract structured
+         context; missing ``@type`` keys leave clients unable to
+         parse the data and silently drop the diagnostic.
 """
 
 from __future__ import annotations
@@ -21,28 +21,27 @@ import json
 import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.transport._task_helpers import AgentProbe
 from a2a_testbed.transport import Transport
 
 
-def make_error_data_atype_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
-    async def verify() -> None:
-        # Trigger a known error: malformed `message/send` (no params).
+def make_error_data_atype_contract(transport: Transport, agent_url: str) -> Contract:
+    async def verify() -> str | None:
+        # Trigger a known error: malformed SendMessage (no params).
         # Most A2A agents respond with -32602 (invalid params); the
         # specific code doesn't matter for this contract — only the
         # data array shape does.
-        rpc_url = agent_url.rstrip("/") + transport.rpc_endpoint_path()
+        probe = await AgentProbe.create(transport, agent_url)
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
-                rpc_url,
+                probe.rpc_url,
                 json={
                     "jsonrpc": "2.0",
                     "id": "error-data-probe",
-                    "method": "message/send",
+                    "method": probe.method("send"),
                     "params": {},
                 },
-                headers={"content-type": "application/json"},
+                headers=probe.headers(),
             )
         try:
             body = json.loads(resp.text)
@@ -52,6 +51,9 @@ def make_error_data_atype_contract(
         data = error.get("data")
         if data is None:
             return  # OPTIONAL field; nothing to validate
+        if probe.is_legacy:
+            # A2A 0.3 left error.data free-form; the typed-Any array is 1.0's.
+            return "skipped — A2A 0.3 agent; error.data was free-form before 1.0"
         assert isinstance(data, list), (
             f"error.data MUST be an array when present; got {type(data).__name__}"
         )
@@ -62,16 +64,12 @@ def make_error_data_atype_contract(
                 continue
             atype = entry.get("@type")
             if not isinstance(atype, str) or not atype:
-                offenders.append(
-                    f"error.data[{i}] missing required '@type' key (§3.3.2)"
-                )
+                offenders.append(f"error.data[{i}] missing required '@type' key (§3.3.2)")
         assert not offenders, "; ".join(offenders)
 
     return Contract(
         id="transport.error_data_atype",
-        description=(
-            "error.data[*] entries carry @type per ProtoJSON Any (§3.3.2)"
-        ),
+        description=("error.data[*] entries carry @type per ProtoJSON Any (§3.3.2)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

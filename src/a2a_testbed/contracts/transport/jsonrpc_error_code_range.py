@@ -20,8 +20,8 @@ import json
 import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.transport._task_helpers import AgentProbe
 from a2a_testbed.transport import Transport
-
 
 _VALID_RESERVED = {
     -32700,  # parse error
@@ -32,9 +32,7 @@ _VALID_RESERVED = {
 }
 
 
-def make_jsonrpc_error_code_range_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_jsonrpc_error_code_range_contract(transport: Transport, agent_url: str) -> Contract:
     """Probe the agent with a method it doesn't implement and verify
     the error code is either a JSON-RPC standard code or in the A2A
     reserved range.
@@ -47,16 +45,15 @@ def make_jsonrpc_error_code_range_contract(
             "method": "method/that/definitely/does/not/exist",
             "params": {},
         }
-        url = agent_url.rstrip("/") + transport.rpc_endpoint_path()
+        probe = await AgentProbe.create(transport, agent_url)
+        url = probe.rpc_url
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=bogus)
+            resp = await client.post(url, json=bogus, headers=probe.headers())
         assert resp.status_code == 200, (
             f"RPC returned {resp.status_code} for unknown method; expected 200"
         )
         body = json.loads(resp.text)
-        assert "error" in body, (
-            "unknown method MUST produce a JSON-RPC error response"
-        )
+        assert "error" in body, "unknown method MUST produce a JSON-RPC error response"
         code = body["error"].get("code")
         assert isinstance(code, int), "error.code MUST be an integer"
         in_a2a_range = -32099 <= code <= -32001

@@ -35,6 +35,7 @@ async def apply_fault(
     url: str,
     payload: dict,
     client: httpx.AsyncClient,
+    headers: Optional[dict[str, str]] = None,
 ) -> httpx.Response:
     """Send (or simulate sending) a request with the configured fault applied.
 
@@ -42,18 +43,18 @@ async def apply_fault(
     the fault declares the message is silently lost.
     """
     if fault is None or fault.kind == FaultKind.NONE:
-        return await client.request(method, url, json=payload)
+        return await client.request(method, url, json=payload, headers=headers)
 
     if fault.kind == FaultKind.DROP:
         raise DroppedRequest("fault: drop")
 
     if fault.kind == FaultKind.DELAY:
         await asyncio.sleep(max(0, fault.delay_ms) / 1000.0)
-        return await client.request(method, url, json=payload)
+        return await client.request(method, url, json=payload, headers=headers)
 
     if fault.kind == FaultKind.CORRUPT:
         mutated = _corrupt_payload(payload, fault.corrupt_pattern)
-        return await client.request(method, url, json=mutated)
+        return await client.request(method, url, json=mutated, headers=headers)
 
     if fault.kind == FaultKind.HTTP_ERROR:
         return _synthetic_error(fault.http_status, url)

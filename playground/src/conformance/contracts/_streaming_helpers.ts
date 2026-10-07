@@ -3,9 +3,22 @@
 // body — Cloudflare Workers + the math-agent already return event-stream
 // bodies in browser-readable form, no preflight tweaks needed.
 
+import { cardToV10 } from '../dialect';
 import { fetchCard, jsonRpcCall } from '../transport';
 
 export const PUSH_RECEIVER_BASE = 'https://push.a2a-testbed.com';
+
+/** Receiver the push contracts use; overridable for offline runs (the
+ *  Python side reads A2A_TESTBED_PUSH_RECEIVER). */
+let pushReceiverBase = PUSH_RECEIVER_BASE;
+
+export function setPushReceiverBase(url: string | null): void {
+  pushReceiverBase = (url ?? PUSH_RECEIVER_BASE).replace(/\/$/, '');
+}
+
+export function getPushReceiverBase(): string {
+  return pushReceiverBase;
+}
 
 export interface SseEvent {
   [k: string]: unknown;
@@ -22,12 +35,12 @@ export async function streamSseEvents(
   agentUrl: string,
   method: string,
   params: unknown,
-  opts: { maxEvents?: number } = {},
+  opts: { maxEvents?: number; headers?: Record<string, string>; requestId?: string } = {},
 ): Promise<SseEvent[]> {
   const url = agentUrl.replace(/\/$/, '') + RPC_PATH;
   const req = {
     jsonrpc: '2.0',
-    id: `sse-${Math.random().toString(36).slice(2, 10)}`,
+    id: opts.requestId ?? `sse-${Math.random().toString(36).slice(2, 10)}`,
     method,
     params,
   };
@@ -36,12 +49,15 @@ export async function streamSseEvents(
     headers: {
       'content-type': 'application/json',
       accept: 'text/event-stream',
+      ...(opts.headers ?? {}),
     },
     body: JSON.stringify(req),
   });
   const ctype = res.headers.get('content-type') ?? '';
   if (!ctype.toLowerCase().includes('text/event-stream')) {
-    throw new SseFormatError(`expected text/event-stream, got ${JSON.stringify(ctype)}`);
+    // Not SSE — surface the JSON-RPC error if the agent sent one.
+    const raw = await res.text().catch(() => '');
+    throw new SseFormatError(`expected text/event-stream, got ${JSON.stringify(ctype)}`, raw);
   }
   const reader = res.body?.getReader();
   if (!reader) throw new SseFormatError('no response body to stream');
@@ -52,7 +68,13 @@ export async function streamSseEvents(
   while (events.length < max) {
     const { value, done } = await reader.read();
     if (done) break;
+    // SSE allows CRLF, LF or CR line endings; sse-starlette (used by
+    // the a2a-sdk) emits CRLF. Normalize, holding back a trailing CR
+    // whose LF may arrive in the next chunk.
     buffer += decoder.decode(value, { stream: true });
+    const held = buffer.endsWith('\r') ? '\r' : '';
+    if (held) buffer = buffer.slice(0, -1);
+    buffer = buffer.replace(/\r\n?/g, '\n');
     while (buffer.includes('\n\n')) {
       const idx = buffer.indexOf('\n\n');
       const block = buffer.slice(0, idx);
@@ -61,7 +83,9 @@ export async function streamSseEvents(
       if (parsed) events.push(parsed);
       if (events.length >= max) break;
     }
+    buffer += held;
   }
+  buffer = buffer.replace(/\r\n?/g, '\n');
   if (buffer.trim()) {
     const parsed = parseSseBlock(buffer);
     if (parsed) events.push(parsed);
@@ -83,21 +107,36 @@ function parseSseBlock(block: string): SseEvent | null {
   }
 }
 
-export class SseFormatError extends Error {}
+export class SseFormatError extends Error {
+  /** JSON-RPC error code when the agent answered with a plain error envelope. */
+  readonly errorCode: number | null;
+
+  constructor(message: string, body = '') {
+    super(message);
+    let code: number | null = null;
+    try {
+      const parsed = JSON.parse(body) as { error?: { code?: unknown } };
+      if (typeof parsed?.error?.code === 'number') code = parsed.error.code;
+    } catch {
+      /* not JSON */
+    }
+    this.errorCode = code;
+  }
+}
 
 /**
  * Capability-gated skip checks. Streaming / push contracts only
  * apply when the AgentCard advertises the matching capability.
  */
 export function streamingSkipDetail(card: Record<string, unknown> | null): string | null {
-  const caps = (card?.capabilities ?? null) as Record<string, unknown> | null;
+  const caps = (cardToV10(card).capabilities ?? null) as Record<string, unknown> | null;
   return caps?.streaming === true
     ? null
     : 'skipped — agent does not advertise capabilities.streaming=true';
 }
 
 export function pushSkipDetail(card: Record<string, unknown> | null): string | null {
-  const caps = (card?.capabilities ?? null) as Record<string, unknown> | null;
+  const caps = (cardToV10(card).capabilities ?? null) as Record<string, unknown> | null;
   return caps?.pushNotifications === true
     ? null
     : 'skipped — agent does not advertise capabilities.pushNotifications=true';
@@ -117,7 +156,7 @@ export function freshToken(): string {
 }
 
 export async function readReceivedHooks(token: string): Promise<Array<Record<string, unknown>>> {
-  const res = await fetch(`${PUSH_RECEIVER_BASE}/received/${encodeURIComponent(token)}`);
+  const res = await fetch(`${pushReceiverBase}/received/${encodeURIComponent(token)}`);
   if (!res.ok) return [];
   try {
     const body = (await res.json()) as { hooks?: unknown };

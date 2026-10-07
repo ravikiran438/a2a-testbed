@@ -25,7 +25,6 @@ from a2a_testbed.core.types import (
 )
 from a2a_testbed.scenario import ScenarioRunner
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 THREE_PARTY = REPO_ROOT / "examples" / "agent-cards" / "three-party"
 GO_TEMPLATE = REPO_ROOT / "agents" / "go-template"
@@ -76,3 +75,7 @@ async def test_go_subprocess_agent_round_trip():
     assert step.response_status == 200
     # The agent prepends "[Alice] " (the AgentCard name) to its response.
     assert "Alice" in (step.response_body_excerpt or "")
+    # The template serves A2A 1.0 natively: no legacy fallback, and the
+    # reply is a 1.0 SendMessageResponse ({"message": {...}}).
+    assert "fell back" not in step.detail, step.detail
+    assert '"ROLE_AGENT"' in (step.response_body_excerpt or "")

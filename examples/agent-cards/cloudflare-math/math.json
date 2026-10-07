@@ -5,9 +5,18 @@
   "supportedInterfaces": [
     {
       "protocolBinding": "JSONRPC",
-      "url": "https://math.a2a-testbed.com"
+      "url": "https://math.a2a-testbed.com",
+      "protocolVersion": "1.0"
+    },
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "https://math.a2a-testbed.com",
+      "protocolVersion": "0.3"
     }
   ],
+  "url": "https://math.a2a-testbed.com",
+  "protocolVersion": "0.3",
+  "preferredTransport": "JSONRPC",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,

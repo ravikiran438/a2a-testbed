@@ -6,8 +6,12 @@
 //
 // Reads CLI args --agent-card, --scripts, --port; binds an HTTP server
 // on 127.0.0.1; serves the AgentCard at the well-known URL and a
-// minimal JSON-RPC message/send endpoint. Prints
+// minimal JSON-RPC send endpoint. Prints
 // "A2A_TESTBED_READY: <url>" on stdout when listening.
+//
+// Speaks A2A 1.0 (SendMessage with A2A-Version: 1.0; replies
+// {"message": {...}} with ROLE_AGENT and oneof parts) and still answers
+// A2A 0.3 callers (message/send; bare Message with kind discriminators).
 //
 // Stdlib only (node:http) to keep this template verifiable. Real
 // agents would swap to @a2a-js/sdk for full A2A compliance.
@@ -92,22 +96,23 @@ function main() {
       return;
     }
     const id = payload.id ?? null;
-    if (payload.method !== 'message/send') {
+    if (payload.method !== 'SendMessage' && payload.method !== 'message/send') {
       jsonResponse(res, 200, { jsonrpc: '2.0', id, error: { code: -32601, message: `unknown method ${payload.method}` } });
       return;
     }
+    const versions = String(req.headers['a2a-version'] ?? '').split(',').map((v) => v.trim());
+    if (payload.method === 'SendMessage' && !versions.some((v) => /^1(\.\d+)*$/.test(v))) {
+      // A2A 1.0 §3.6.2: an absent header means 0.3, which has no SendMessage.
+      jsonResponse(res, 200, { jsonrpc: '2.0', id, error: { code: -32009, message: 'SendMessage requires A2A-Version: 1.0' } });
+      return;
+    }
     const text = extractText(payload.params);
-    const response = matchScript(text, scripts);
-    jsonResponse(res, 200, {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        kind: 'message',
-        messageId: `resp-${id}`,
-        role: 'assistant',
-        parts: [{ kind: 'text', text: `[${agentId}] ${response}` }],
-      },
-    });
+    const reply = `[${agentId}] ${matchScript(text, scripts)}`;
+    const result =
+      payload.method === 'SendMessage'
+        ? { message: { messageId: `resp-${id}`, role: 'ROLE_AGENT', parts: [{ text: reply }] } }
+        : { kind: 'message', messageId: `resp-${id}`, role: 'agent', parts: [{ kind: 'text', text: reply }] };
+    jsonResponse(res, 200, { jsonrpc: '2.0', id, result });
   });
 
   server.listen(args.port, args.host, () => {

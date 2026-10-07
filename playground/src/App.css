@@ -1782,6 +1782,18 @@
 .conformance-pending p {
   margin: 0 0 10px;
 }
+.conformance-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+  font-size: 12px;
+}
+
+.conformance-version select {
+  font: inherit;
+}
+
 .conformance-run-btn,
 .conformance-reset-btn {
   font-size: 12px;

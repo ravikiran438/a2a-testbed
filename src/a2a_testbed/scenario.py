@@ -30,6 +30,7 @@ from a2a_testbed.core.time_controller import TimeController
 from a2a_testbed.core.types import (
     AgentDecl,
     ContractFinding,
+    FaultKind,
     Expectation,
     NetworkMode,
     RuntimeKind,
@@ -49,7 +50,6 @@ from a2a_testbed.runtimes import (
     PythonSubprocRuntime,
 )
 from a2a_testbed.transport import A2ATransport, Transport, WireMessage
-
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,8 @@ class ScenarioRunner:
         self._timeout = http_timeout
         self._log_level = log_level
         self._transport: Transport = transport or A2ATransport()
+        # agent base URL -> negotiated wire revision (see _protocol_version_for)
+        self._protocol_versions: dict[str, Optional[str]] = {}
         # When True, the contract evaluator runs the transport
         # contract suite against agents declared `runtime: external`
         # too — opt-in because their CORS allowlist / rate limit /
@@ -337,6 +339,7 @@ class ScenarioRunner:
         started_at = datetime.now(timezone.utc)
         t0 = time.perf_counter()
         results: list[StepResult] = []
+        self._protocol_versions = {}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             for index, step in enumerate(scenario.flow):
@@ -519,6 +522,17 @@ class ScenarioRunner:
             )
 
         url = agent_url[step.to].rstrip("/") + self._transport.rpc_endpoint_path()
+        # Faults that never reach the agent (drop / synthetic HTTP error)
+        # must not contact it for its card either.
+        offline_fault = step.fault is not None and step.fault.kind in (
+            FaultKind.DROP,
+            FaultKind.HTTP_ERROR,
+        )
+        protocol_version = (
+            self._protocol_versions.get(agent_url[step.to])
+            if offline_fault
+            else await self._protocol_version_for(client, agent_url[step.to])
+        )
         wire = WireMessage(
             sender_id=step.from_ or "",
             receiver_id=step.to,
@@ -529,7 +543,8 @@ class ScenarioRunner:
                 "message_id": str(uuid.uuid4()),
             },
         )
-        payload = self._transport.encode_request(wire)
+        payload = self._transport.encode_request(wire, protocol_version=protocol_version)
+        headers = self._transport.request_headers(protocol_version)
 
         # ACS PRE-dispatch checkpoints (input / pre_tool_call). In
         # enforce mode a blocking verdict (deny / escalate) stops the
@@ -546,8 +561,29 @@ class ScenarioRunner:
             )
 
         t0 = time.perf_counter()
+        fallback_note = ""
         try:
-            response = await apply_fault(step.fault, "POST", url, payload, client)
+            response = await apply_fault(step.fault, "POST", url, payload, client, headers)
+            # No fallback under an injected fault: a corrupted request can
+            # earn MethodNotFound on its own, and retrying would mask the fault.
+            legacy = (
+                None
+                if step.fault is not None and step.fault.kind != FaultKind.NONE
+                else self._legacy_fallback_version(protocol_version, response)
+            )
+            if legacy is not None:
+                # The card advertised the current protocol but the agent
+                # only knows the legacy method names. Deliver the message
+                # anyway (scenario runs exercise flows, not conformance)
+                # and say so; the conformance sweep flags the mismatch
+                # as transport.advertised_version_served.
+                payload = self._transport.encode_request(wire, protocol_version=legacy)
+                headers = self._transport.request_headers(legacy)
+                response = await apply_fault(step.fault, "POST", url, payload, client, headers)
+                fallback_note = (
+                    f" (agent card advertises A2A {protocol_version} but the agent "
+                    f"only served A2A {legacy} method names; fell back)"
+                )
         except DroppedRequest:
             return StepResult(
                 step_index=index,
@@ -570,6 +606,7 @@ class ScenarioRunner:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         body_excerpt = self._excerpt(response.text)
         passed, detail = self._evaluate(step.expect, response, body_excerpt)
+        detail += fallback_note
         # ACS POST-dispatch checkpoints (post_tool_call / output).
         post_verdicts = await self._evaluate_acs(step, payload, response, phase="post")
         all_verdicts = pre_verdicts + post_verdicts
@@ -588,6 +625,44 @@ class ScenarioRunner:
             acs_verdicts=all_verdicts,
             acs_blocked=blocked,
         )
+
+    async def _protocol_version_for(
+        self, client: httpx.AsyncClient, base_url: str
+    ) -> Optional[str]:
+        """Wire revision to speak to the agent at ``base_url``, from its card.
+
+        Cached per run. An unreachable or unparsable card falls back to
+        the transport's current revision.
+        """
+        if base_url in self._protocol_versions:
+            return self._protocol_versions[base_url]
+        version: Optional[str] = None
+        try:
+            resp = await client.get(base_url.rstrip("/") + self._transport.card_endpoint_path())
+            if resp.status_code == 200:
+                version = self._transport.protocol_version_for_card(resp.json())
+        except (httpx.HTTPError, ValueError):
+            version = None
+        self._protocol_versions[base_url] = version
+        return version
+
+    @staticmethod
+    def _legacy_fallback_version(
+        protocol_version: Optional[str], response: httpx.Response
+    ) -> Optional[str]:
+        """``"0.3"`` when a 1.0 request was answered with MethodNotFound."""
+        from a2a_testbed.transport.dialect import Dialect
+
+        if protocol_version not in (None, Dialect.V1_0.value):
+            return None
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        error = body.get("error") if isinstance(body, dict) else None
+        if isinstance(error, dict) and error.get("code") == -32601:
+            return Dialect.V0_3.value
+        return None
 
     # Decisions that block the action in enforce mode. ``escalate`` is
     # "blocked pending human approval" — for an automated run we treat
@@ -653,25 +728,6 @@ class ScenarioRunner:
             verdict = await evaluator.evaluate(manifest, point, snapshot)
             verdicts.append(verdict.model_dump(mode="json"))
         return verdicts
-
-    @staticmethod
-    def _build_send_message_request_LEGACY(step: Step) -> dict:
-        """Deprecated: kept only as a reference; the live path uses
-        ``self._transport.encode_request`` instead."""
-        message_text = step.message or step.action or ""
-        return {
-            "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
-            "method": "message/send",
-            "params": {
-                "message": {
-                    "messageId": str(uuid.uuid4()),
-                    "role": "user",
-                    "parts": [{"kind": "text", "text": message_text}],
-                },
-                "configuration": {"blocking": True},
-            },
-        }
 
     @staticmethod
     def _excerpt(text: str, *, limit: int = 1024) -> str:

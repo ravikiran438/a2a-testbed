@@ -15,7 +15,9 @@ And on startup must:
 2. Print exactly one line to stdout: "A2A_TESTBED_READY: <base_url>"
 3. Serve the AgentCard at /.well-known/agent-card.json
 4. Accept JSON-RPC at /a2a/v1/ (or whatever DEFAULT_RPC_URL the SDK uses)
-5. Respond to message/send by matching the message text against the
+5. Respond to A2A 1.0 ``SendMessage`` (sent with ``A2A-Version: 1.0``;
+   reply ``{"message": {...}}``) — and, for 0.3 callers, ``message/send``
+   (reply a bare Message) — by matching the message text against the
    scripts map; fallback to "[<agent_id>] handled action: <text>"
 
 The orchestrator uses the printed URL to discover the bound port (which
@@ -38,7 +40,7 @@ from a2a.types import AgentCard
 from google.protobuf.json_format import MessageToJson
 
 from a2a_testbed.runtimes.base import AgentRuntime, RuntimeUnavailable
-
+from a2a_testbed.transport.dialect import Dialect, card_to_v03_json, dialect_of_proto_card
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,12 @@ class SubprocessRuntimeBase(AgentRuntime):
         td = Path(self._tempdir.name)
         card_path = td / "agent-card.json"
         scripts_path = td / "scripts.json"
-        card_path.write_text(MessageToJson(self._original_card), encoding="utf-8")
+        # Serve the card in its own version's layout (0.3 cards stay 0.3).
+        if dialect_of_proto_card(self._original_card) is Dialect.V0_3:
+            card_text = json.dumps(card_to_v03_json(self._original_card))
+        else:
+            card_text = MessageToJson(self._original_card)
+        card_path.write_text(card_text, encoding="utf-8")
         scripts_path.write_text(json.dumps(self._scripts), encoding="utf-8")
 
         cmd = [

@@ -91,8 +91,26 @@ class Transport(abc.ABC):
         """Relative path the agent listens on for messages, e.g. /a2a/v1/."""
 
     @abc.abstractmethod
-    def encode_request(self, message: WireMessage) -> dict[str, Any]:
-        """Translate a `WireMessage` into the protocol's request body."""
+    def encode_request(
+        self, message: WireMessage, *, protocol_version: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Translate a `WireMessage` into the protocol's request body.
+
+        ``protocol_version`` selects a wire revision when the protocol
+        has several (see :meth:`protocol_version_for_card`); ``None``
+        means the transport's current revision.
+        """
+
+    def request_headers(self, protocol_version: Optional[str] = None) -> dict[str, str]:
+        """HTTP headers a client sends with every request (e.g. version negotiation)."""
+        return {}
+
+    def protocol_version_for_card(self, card_json: Any) -> Optional[str]:
+        """Wire revision to speak to an agent, from its card JSON.
+
+        ``None`` means the transport's current revision.
+        """
+        return None
 
     @abc.abstractmethod
     def decode_response(self, raw_body: str, status: int) -> WireResponse:
@@ -127,3 +145,18 @@ class Transport(abc.ABC):
         message: str,
     ) -> dict[str, Any]:
         """Construct a protocol-native error response."""
+
+    def handle_rpc(
+        self,
+        body: Any,
+        headers: Any,
+        card: Any,
+        script_for: Any,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        """Answer one request for a testbed-hosted (in-process) agent.
+
+        ``script_for`` maps the request's text to the scripted reply.
+        Transports that host in-process agents must implement this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot host in-process agents")

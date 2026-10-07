@@ -17,7 +17,7 @@ export const CHUNK_SIZE = 10;
 /**
  * Run a slice of the contract list. Used by the playground UI to
  * pace requests against rate-limited external agents — the user
- * clicks through batches instead of bursting all 58 calls at once.
+ * clicks through batches instead of bursting all 62 calls at once.
  *
  * `startIndex === 0` clears every per-sweep cache so a fresh
  * sweep sees current agent state. Subsequent chunks reuse the

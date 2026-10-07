@@ -1,0 +1,22 @@
+{
+  "name": "Legacy Agent",
+  "description": "A2A 0.3 agent (pre-1.0 card layout). Serves only the 0.3 method names; the testbed speaks 0.3 to it.",
+  "version": "0.9.0",
+  "protocolVersion": "0.3.0",
+  "url": "http://127.0.0.1:0",
+  "preferredTransport": "JSONRPC",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "skills": [
+    {
+      "id": "fulfil",
+      "name": "Fulfil",
+      "description": "Fulfils requests from newer agents.",
+      "tags": ["legacy"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"]
+}

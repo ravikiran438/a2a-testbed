@@ -4,51 +4,56 @@
 // any error response is a soft pass with the deviation in the detail
 // when the error code doesn't match the spec-mandated one.
 
-import { assert, fetchCard, jsonRpcCall } from '../transport';
+import type { Op } from '../dialect';
+import { pushSetParams } from '../dialect';
+import { assert, jsonRpcCall } from '../transport';
 import type { Contract } from '../types';
+import { AgentProbe } from './_probe';
 
 interface CapabilityProbeOpts {
   capabilityKey: 'streaming' | 'pushNotifications' | 'extendedAgentCard';
   capabilityClaimedTrueDetail: string;
   expectedCode: number;
   expectedCodeName: string;
-  method: string;
-  params: unknown;
+  /** Operation probed, in whichever version the agent speaks. */
+  op: Op;
+  params: (probe: AgentProbe) => unknown;
   /** §-citation used in the soft-pass message. */
   specCite: string;
-  /** Human label for the operation, e.g. "message/stream". */
-  opLabel: string;
+  /** Human label for the operation; defaults to the method name. */
+  opLabel?: string;
 }
 
 async function runCapabilityProbe(
   agentUrl: string,
   opts: CapabilityProbeOpts,
 ): Promise<undefined | string> {
-  const { body: card } = await fetchCard(agentUrl);
-  const claim = (card as { capabilities?: Record<string, unknown> })?.capabilities?.[
-    opts.capabilityKey
-  ];
-  if (claim === true) {
+  const probe = await AgentProbe.create(agentUrl);
+  // Read from the 1.0 view so a 0.3 card's top-level
+  // supportsAuthenticatedExtendedCard counts as extendedAgentCard.
+  if (probe.capability(opts.capabilityKey) === true) {
     return opts.capabilityClaimedTrueDetail;
   }
+  const label = opts.opLabel ?? probe.method(opts.op);
 
   const { body, status } = await jsonRpcCall(
     agentUrl,
-    opts.method,
-    opts.params,
+    probe.method(opts.op),
+    opts.params(probe),
     `cap-${opts.capabilityKey}`,
+    probe.headers(),
   );
 
   if (!body || typeof body !== 'object') {
     throw new Error(
-      `agent advertises ${opts.capabilityKey}=false but ${opts.opLabel} ` +
+      `agent advertises ${opts.capabilityKey}=false but ${label} ` +
         `returned non-JSON (status ${status})`,
     );
   }
   const obj = body as Record<string, unknown>;
   if ('result' in obj && !('error' in obj)) {
     throw new Error(
-      `agent advertises ${opts.capabilityKey}=false but ${opts.opLabel} ` +
+      `agent advertises ${opts.capabilityKey}=false but ${label} ` +
         `returned a result; per ${opts.specCite} it MUST return ` +
         `${opts.expectedCodeName} (${opts.expectedCode})`,
     );
@@ -58,7 +63,7 @@ async function runCapabilityProbe(
   if (code === opts.expectedCode) return; // strict pass
   // Soft pass: capability honored, wrong error code.
   return (
-    `capability honored — agent refused ${opts.opLabel} as required ` +
+    `capability honored — agent refused ${label} as required ` +
     `(${opts.specCite}), but returned code ${code} ` +
     `(${error.message ?? '?'}); spec mandates ${opts.expectedCode} ` +
     `(${opts.expectedCodeName})`
@@ -68,7 +73,7 @@ async function runCapabilityProbe(
 export const streamingCapabilityConsistency: Contract = {
   id: 'transport.streaming_capability_consistency',
   specSection: '§3.1.2',
-  description: 'message/stream returns -32004 when streaming=false.',
+  description: 'SendStreamingMessage returns -32004 when streaming=false.',
   category: 'transport',
   verify: (agentUrl) =>
     runCapabilityProbe(agentUrl, {
@@ -76,16 +81,9 @@ export const streamingCapabilityConsistency: Contract = {
       capabilityClaimedTrueDetail: 'skipped — agent advertises streaming=true',
       expectedCode: -32004,
       expectedCodeName: 'UnsupportedOperationError',
-      method: 'message/stream',
-      params: {
-        message: {
-          messageId: 'cap-stream-probe',
-          role: 'user',
-          parts: [{ kind: 'text', text: 'probe' }],
-        },
-      },
+      op: 'stream',
+      params: (p) => p.sendParams('probe'),
       specCite: '§3.1.2',
-      opLabel: 'message/stream',
     }),
 };
 
@@ -100,13 +98,13 @@ export const pushNotificationsCapabilityConsistency: Contract = {
       capabilityClaimedTrueDetail: 'skipped — agent advertises pushNotifications=true',
       expectedCode: -32003,
       expectedCodeName: 'PushNotificationNotSupportedError',
-      method: 'tasks/pushNotificationConfig/set',
-      params: {
-        taskId: '00000000-0000-0000-0000-000000000000',
-        pushNotificationConfig: {
-          url: 'https://example.invalid/webhook',
-        },
-      },
+      op: 'push_set',
+      params: (p) =>
+        pushSetParams(
+          p.dialect,
+          '00000000-0000-0000-0000-000000000000',
+          'https://example.invalid/webhook',
+        ),
       specCite: '§3.5',
       opLabel: 'push config',
     }),
@@ -123,8 +121,8 @@ export const extendedCardCapabilityConsistency: Contract = {
       capabilityClaimedTrueDetail: 'skipped — agent advertises extendedAgentCard=true',
       expectedCode: -32004,
       expectedCodeName: 'UnsupportedOperationError',
-      method: 'agent/getAuthenticatedExtendedCard',
-      params: {},
+      op: 'extended_card',
+      params: () => ({}),
       specCite: '§3.1.7',
       opLabel: 'extended-card op',
     }),

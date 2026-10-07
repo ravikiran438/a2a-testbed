@@ -3,11 +3,11 @@
 
 """Transport contract: pushNotificationConfig/set on unknown taskId fails.
 
-  Spec:    A2A 1.0 §3.1.7 (CreateTaskPushNotificationConfig), §9.5
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Setting a push config against a non-existent taskId MUST
-           return ``TaskNotFoundError`` (-32001). Same strict /
-           soft-pass model as the other not-found contracts.
+Spec:    A2A 1.0 §3.1.7 (CreateTaskPushNotificationConfig), §9.5
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Setting a push config against a non-existent taskId MUST
+         return ``TaskNotFoundError`` (-32001). Same strict /
+         soft-pass model as the other not-found contracts.
 """
 
 from __future__ import annotations
@@ -16,36 +16,29 @@ import uuid
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.contracts.transport._task_helpers import (
+    METHOD_NOT_FOUND_CODE,
     TASK_NOT_FOUND_CODE,
-    call_method,
-    fetch_card,
+    AgentProbe,
+    error_code,
     push_skip_detail,
 )
 from a2a_testbed.transport import Transport
+from a2a_testbed.transport.dialect import push_set_params
 
 
-def make_push_set_task_not_found_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_push_set_task_not_found_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
-        card = await fetch_card(transport, agent_url)
-        skip = push_skip_detail(card)
+        probe = await AgentProbe.create(transport, agent_url)
+        skip = push_skip_detail(probe.card)
         if skip:
             return skip
         bogus = str(uuid.uuid4())
-        envelope = await call_method(
-            transport,
-            agent_url,
-            "tasks/pushNotificationConfig/set",
-            {
-                "taskId": bogus,
-                "pushNotificationConfig": {
-                    "url": "https://example.invalid/webhook",
-                },
-            },
+        envelope = await probe.call(
+            "push_set",
+            push_set_params(probe.dialect, bogus, url="https://example.invalid/webhook"),
         )
-        if "error" in envelope and envelope.get("error", {}).get("code") == -32601:
-            return "skipped — agent does not implement pushNotificationConfig/set"
+        if error_code(envelope) == METHOD_NOT_FOUND_CODE:
+            return f"skipped — agent does not implement {probe.method('push_set')} (-32601)"
         if "result" in envelope and envelope.get("error") is None:
             raise AssertionError(
                 f"set returned a result for bogus taskId {bogus!r}; spec "
@@ -63,9 +56,7 @@ def make_push_set_task_not_found_contract(
 
     return Contract(
         id="transport.push_set_task_not_found",
-        description=(
-            "pushNotificationConfig/set on unknown taskId returns -32001 (§3.1.7)"
-        ),
+        description=("pushNotificationConfig/set on unknown taskId returns -32001 (§3.1.7)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

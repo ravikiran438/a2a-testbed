@@ -29,6 +29,11 @@ and point it at your agent + manifest via environment variables::
     A2A_TARGET_URL=https://my-agent.example.com
     A2A_RECEIVER=my-agent                 # tool/agent id used in snapshots
     ACS_MANIFEST=examples/acs/email-agent.acs.yaml
+    A2A_PROTOCOL_VERSION=1.0              # optional; default: from the AgentCard
+
+The agent is addressed in the A2A version its AgentCard advertises: 1.0
+(``SendMessage`` + ``A2A-Version: 1.0``) by default, 0.3
+(``message/send``) for 0.3 cards.
 
 For a richer judge view (intermediate tool calls, routing), emit
 OpenTelemetry spans from the agent and add a ``target.trace`` block — see
@@ -53,7 +58,7 @@ from a2a_testbed.acs import (
     validate_manifest,
 )
 from a2a_testbed.core.observer import WireExchange
-
+from a2a_testbed.transport import dialect as d
 
 A2A_RPC_PATH = "/a2a/v1/"
 
@@ -123,25 +128,43 @@ def _annotate_verdicts(span, verdicts: list[dict[str, Any]]) -> None:
     span.set_attribute("acs.blocked", blocked)
 
 
-def build_request(message: str, *, context_id: Optional[str] = None) -> dict[str, Any]:
-    """Build an A2A JSON-RPC ``message/send`` payload for one user turn.
+def build_request(
+    message: str,
+    *,
+    context_id: Optional[str] = None,
+    protocol_version: str = d.CURRENT.value,
+) -> dict[str, Any]:
+    """Build an A2A JSON-RPC send payload for one user turn.
 
-    When ``context_id`` is given it is attached to the message so an A2A
-    server can correlate turns of the same conversation (A2A multi-turn:
-    the server maintains state keyed by ``contextId``).
+    A2A 1.0 (``SendMessage``) by default; ``protocol_version="0.3"``
+    builds the 0.3 ``message/send`` form. When ``context_id`` is given it
+    is attached to the message so an A2A server can correlate turns of
+    the same conversation (A2A multi-turn: the server maintains state
+    keyed by ``contextId``).
     """
-    msg: dict[str, Any] = {
-        "role": "user",
-        "parts": [{"kind": "text", "text": message}],
-    }
-    if context_id:
-        msg["contextId"] = context_id
+    dialect = d.Dialect(protocol_version)
     return {
         "jsonrpc": "2.0",
         "id": "assert-1",
-        "method": "message/send",
-        "params": {"message": msg, "configuration": {"blocking": True}},
+        "method": d.method(dialect, "send"),
+        "params": d.send_params(
+            dialect, d.text_message(dialect, message, context_id=context_id), blocking=True
+        ),
     }
+
+
+async def resolve_protocol_version(agent_url: str) -> str:
+    """A2A version to speak to ``agent_url``: ``A2A_PROTOCOL_VERSION``,
+    else the one its AgentCard advertises (1.0 when the card is unreadable)."""
+    pinned = os.environ.get("A2A_PROTOCOL_VERSION")
+    if pinned:
+        return d.Dialect(pinned).value
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(agent_url.rstrip("/") + "/.well-known/agent-card.json")
+        return d.detect_dialect(resp.json()).value
+    except (httpx.HTTPError, ValueError):
+        return d.CURRENT.value
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +214,17 @@ def extract_text(response_body: dict[str, Any]) -> str:
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
-        for candidate in (result, result.get("message", {}), result.get("status", {})):
+        # A2A 1.0 wraps the send result as {"task": ...} / {"message": ...}.
+        task = result.get("task") if isinstance(result.get("task"), dict) else result
+        status = task.get("status") if isinstance(task.get("status"), dict) else {}
+        artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), list) else []
+        for candidate in (
+            result,
+            result.get("message", {}),
+            status.get("message", {}),
+            status,
+            *artifacts,
+        ):
             text = _parts_text(candidate) if isinstance(candidate, dict) else None
             if text:
                 return text
@@ -257,13 +290,17 @@ def make_chat(agent_url: str, manifest_path: str | Path, *, receiver_id: str = "
     manifest = result.manifest
     evaluator = _build_evaluator(manifest)
     endpoint = agent_url.rstrip("/") + A2A_RPC_PATH
+    negotiated: dict[str, str] = {}
 
     async def chat(message: str, history: Optional[list[dict[str, str]]] = None) -> str:
+        if "version" not in negotiated:
+            negotiated["version"] = await resolve_protocol_version(agent_url)
+        version = negotiated["version"]
         # Multi-turn: send the latest user turn under a stable contextId so
         # a stateful A2A agent threads the conversation together.
         context_id = derive_context_id(message, history)
         turn_text = current_turn_text(message, history)
-        payload = build_request(turn_text, context_id=context_id)
+        payload = build_request(turn_text, context_id=context_id, protocol_version=version)
         with _span(
             "a2a_acs_target.chat",
             "AGENT",
@@ -277,7 +314,11 @@ def make_chat(agent_url: str, manifest_path: str | Path, *, receiver_id: str = "
                 {"tool.name": receiver_id, "input.value": turn_text},
             ) as tool_span:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(endpoint, json=payload)
+                    resp = await client.post(
+                        endpoint,
+                        json=payload,
+                        headers=d.request_headers(d.Dialect(version)),
+                    )
                 try:
                     body = resp.json()
                 except Exception:  # noqa: BLE001

@@ -26,9 +26,10 @@ semantics.
 ## Coverage
 
 A full sweep of the A2A spec produced ~81 testable conformance
-requirements across 13 categories. The current bundle covers **61**:
-58 transport contracts spanning AgentCard discovery + structure,
-extension declarations, signatures, versioning, transport-level
+requirements across 13 categories. The current bundle covers **65**:
+62 transport contracts spanning AgentCard discovery + structure,
+extension declarations, signatures, versioning and version
+negotiation, transport-level
 security, JSON serialization, JSON-RPC envelope/error semantics,
 capability ↔ method consistency, task lifecycle, GetTask /
 CancelTask / ListTasks, multi-turn (contextId), **streaming (SSE)**,
@@ -42,6 +43,22 @@ and authorization scheme negotiation.
 
 **Live coverage:** run `a2a-testbed coverage` for a current
 implemented-vs-roadmap breakdown with the spec-pin header.
+
+## Protocol versions (A2A 1.0 and 0.3)
+
+Every contract probes the agent in the protocol version its AgentCard
+advertises — A2A 1.0 (`SendMessage`, `A2A-Version: 1.0`) unless the
+card is a 0.3 card or lists only 0.x JSONRPC interfaces, in which case
+0.3 (`message/send`, no header). `a2a-testbed conformance
+--protocol-version 0.3` pins the legacy surface of an agent that serves
+both. Results from 0.3 agents are normalized to the 1.0 shape before
+assertions run (states, roles, parts, send results, stream events,
+push configs); results from 1.0 agents are checked as sent. Rules
+that 1.0 introduced skip for 0.3 agents with an explicit detail:
+`agent_card_protocol_version_format`, `version_not_supported`,
+`error_data_atype` (0.3's `error.data` was free-form), and
+`tasks_list_sorted_desc` (0.3 has no task-list method). Contract ids
+are unchanged across versions so reports stay comparable.
 
 ## Manifest-based extension validation
 
@@ -105,6 +122,8 @@ renders it as the per-row "Spec §" column.
 | Contract id | Spec section | Notes |
 |---|---|---|
 | `transport.agent_card_protocol_version_format` | §3.6 | protocolVersion is Major.Minor (no patch) |
+| `transport.advertised_version_served` | §3.6.2, §9.1 | The agent answers the JSON-RPC method names of the version its card advertises (flags a 1.0 card served by 0.3-only method names) |
+| `transport.version_not_supported` | §3.6.2 | A request for an unsupported `A2A-Version` returns VersionNotSupportedError `-32009` (1.0 agents) |
 
 ### Transport-level security
 
@@ -130,14 +149,15 @@ renders it as the per-row "Spec §" column.
 | `transport.jsonrpc_result_xor_error` | JSON-RPC 2.0 §5 | Exactly one of result / error per response |
 | `transport.jsonrpc_error_code_range` | §9.5 | A2A-specific errors live in `-32001..-32099` |
 | `transport.method_not_found` | §9 + JSON-RPC 2.0 §5.1 | Unknown method returns `-32601` |
-| `transport.send_message_required_fields` | §3.1.1 | `message/send` request shape constraints |
+| `transport.send_message_required_fields` | §3.1.1 | `SendMessage` request shape constraints |
+| `transport.send_message_result_shape` | §9.4.1, §3.2.2 | `SendMessage` result is exactly one of `{task}` / `{message}` (0.3: a Task/Message with `kind`) |
 | `transport.error_data_atype` | §3.3.2 | error.data[*] entries carry `@type` per ProtoJSON Any |
 
 ### Capability ↔ method consistency
 
 | Contract id | Spec section | Notes |
 |---|---|---|
-| `transport.streaming_capability_consistency` | §3.1.2, §9.5 | When `capabilities.streaming=false`, `message/stream` MUST return `-32004` (UnsupportedOperationError) |
+| `transport.streaming_capability_consistency` | §3.1.2, §9.5 | When `capabilities.streaming=false`, `SendStreamingMessage` MUST return `-32004` (UnsupportedOperationError) |
 | `transport.push_notifications_capability_consistency` | §3.5, §9.5 | When `capabilities.pushNotifications=false`, push config ops MUST return `-32003` (PushNotificationNotSupportedError) |
 | `transport.extended_card_capability_consistency` | §3.1.7, §9.5 | When `capabilities.extendedAgentCard=false`, `agent/getAuthenticatedExtendedCard` MUST return `-32004` |
 
@@ -150,7 +170,7 @@ fails the contract — that's the agent lying about its capabilities.
 
 ### Task lifecycle
 
-Skip-gracefully: contracts probe with `message/send` and inspect the
+Skip-gracefully: contracts probe with `SendMessage` and inspect the
 response. If the agent returns a Message instead of a Task, the
 contract reports a "skipped" detail and passes.
 
@@ -165,18 +185,18 @@ contract reports a "skipped" detail and passes.
 ### GetTask / CancelTask / ListTasks
 
 Each contract checks for `-32601` (method not implemented) before
-running its assertion; agents that don't support tasks/* skip
+running its assertion; agents that don't support task methods skip
 gracefully. The not-found contracts use the same strict / soft-pass
 model as the capability contracts (200+result fails; -32001 is a
 strict pass; other error codes are soft passes).
 
 | Contract id | Spec section | Notes |
 |---|---|---|
-| `transport.tasks_get_returns_task` | §3.1.3 | tasks/get returns the Task identified by id |
+| `transport.tasks_get_returns_task` | §3.1.3 | GetTask returns the Task identified by id |
 | `transport.tasks_get_not_found` | §3.1.3 + §9.5 | unknown id returns TaskNotFoundError (-32001) |
-| `transport.tasks_cancel_sets_canceled` | §3.1.5 | tasks/cancel transitions task to TASK_STATE_CANCELED (or another terminal state) |
+| `transport.tasks_cancel_sets_canceled` | §3.1.5 | CancelTask transitions task to TASK_STATE_CANCELED (or another terminal state) |
 | `transport.tasks_cancel_not_found` | §3.1.5 + §9.5 | unknown id returns TaskNotFoundError |
-| `transport.tasks_list_sorted_desc` | §3.1.4 | tasks/list returns tasks sorted desc by status.timestamp |
+| `transport.tasks_list_sorted_desc` | §3.1.4 | ListTasks returns tasks sorted desc by status.timestamp |
 
 ### Multi-turn (contextId)
 
@@ -190,11 +210,12 @@ Verified end-to-end against the reference task runner at
 `examples/hosted-agents/cloudflare-task-runner/`. Each contract
 short-circuits with a "skipped" detail when the AgentCard reports
 `capabilities.streaming: false`, so the suite stays clean against
-agents that only do `message/send`.
+agents that only do `SendMessage`.
 
 | Contract id | Spec section | Notes |
 |---|---|---|
-| `transport.streaming_response_content_type` | §3.1.2 | message/stream returns Content-Type text/event-stream |
+| `transport.streaming_response_content_type` | §3.1.2 | SendStreamingMessage returns Content-Type text/event-stream |
+| `transport.streaming_jsonrpc_framing` | §9.4.2 | Each SSE frame is a JSON-RPC response echoing the request id (not a bare StreamResponse) |
 | `transport.streaming_first_event_is_task` | §3.1.2 | first SSE event carries the Task envelope |
 | `transport.streaming_event_kinds` | §3.1.2 | events carry task / statusUpdate / artifactUpdate |
 | `transport.streaming_status_update_shape` | §4.1.6 | TaskStatusUpdateEvent has taskId + status{state, timestamp} |
@@ -206,10 +227,10 @@ agents that only do `message/send`.
 
 | Contract id | Spec section | Notes |
 |---|---|---|
-| `transport.subscribe_returns_stream` | §3.1.6 | tasks/resubscribe returns Content-Type text/event-stream |
+| `transport.subscribe_returns_stream` | §3.1.6 | SubscribeToTask returns Content-Type text/event-stream |
 | `transport.subscribe_replays_state` | §3.1.6 | first event reflects the subscribed task's current state |
 | `transport.subscribe_not_found` | §3.1.6 + §9.5 | unknown id returns TaskNotFoundError (-32001) |
-| `transport.subscribe_capability_required` | §3.1.6 + §9.5 | tasks/resubscribe returns -32004 when streaming=false |
+| `transport.subscribe_capability_required` | §3.1.6 + §9.5 | SubscribeToTask returns -32004 when streaming=false |
 
 ### Push notifications
 

@@ -1,12 +1,19 @@
 /**
- * A2A 1.0 compliant math agent.
+ * A2A 1.0 compliant math agent (with A2A 0.3 compatibility).
  *
  *   Endpoints
  *     GET  /                              -> AgentCard JSON (also serves
  *                                            /.well-known/agent-card.json)
  *     GET  /.well-known/agent-card.json   -> AgentCard JSON
  *     POST /                              -> JSON-RPC 2.0:
- *                                              method "message/send"
+ *                                              "SendMessage" (A2A 1.0,
+ *                                              header A2A-Version: 1.0)
+ *                                              "message/send" (A2A 0.3)
+ *
+ * Every other A2A method answers with the error the spec mandates for
+ * an agent that advertises no streaming / push / extended card and
+ * keeps no task store (§3.3.4): UnsupportedOperation, PushNotification-
+ * NotSupported, or TaskNotFound.
  *
  * The agent answers arithmetic + word-math problems by calling Groq's
  * Llama 3.3 in JSON mode. Forcing JSON output keeps the response shape
@@ -73,9 +80,18 @@ function buildAgentCard(selfUrl: string) {
     version: "1.0.0",
     supportedInterfaces: [
       // protocolVersion is per-interface (§8.3.1, spec line 2143);
-      // declares which A2A protocol revision this binding speaks.
+      // declares which A2A protocol revision this binding speaks. The
+      // same URL also serves 0.3 clients (§3.6.2 allows several
+      // versions per transport and URL); 1.0 is listed first (preferred).
       { url: selfUrl, protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+      { url: selfUrl, protocolBinding: "JSONRPC", protocolVersion: "0.3" },
     ],
+    // A2A 0.3 top-level fields, so 0.3 clients can read the same card
+    // (the merge the a2a-sdk's card route performs for dual-version
+    // agents). 1.0 clients ignore unrecognized fields.
+    url: selfUrl,
+    protocolVersion: "0.3",
+    preferredTransport: "JSONRPC",
     capabilities: {
       streaming: false,
       pushNotifications: false,
@@ -110,20 +126,100 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+type Dialect = "1.0" | "0.3";
+
+// google.rpc.ErrorInfo reasons for the codes this agent returns (§5.4).
+const ERROR_REASONS: Record<number, string> = {
+  [-32001]: "TASK_NOT_FOUND",
+  [-32003]: "PUSH_NOTIFICATION_NOT_SUPPORTED",
+  [-32004]: "UNSUPPORTED_OPERATION",
+  [-32009]: "VERSION_NOT_SUPPORTED",
+  [-32600]: "INVALID_REQUEST",
+  [-32601]: "METHOD_NOT_FOUND",
+  [-32602]: "INVALID_PARAMS",
+  [-32603]: "INTERNAL_ERROR",
+  [-32700]: "JSON_PARSE_ERROR",
+};
+
+/** JSON-RPC error. In 1.0, `error.data` carries a google.rpc.ErrorInfo
+ *  (§9.5); 0.3 errors carry code + message only. */
 function jsonRpcError(
   id: string | number | null | undefined,
   code: number,
   message: string,
   origin: string | null,
+  dialect: Dialect = "1.0",
 ): Response {
+  const error: Record<string, unknown> = { code, message };
+  if (dialect === "1.0" && ERROR_REASONS[code]) {
+    error.data = [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        reason: ERROR_REASONS[code],
+        domain: "a2a-protocol.org",
+        metadata: {},
+      },
+    ];
+  }
   return Response.json(
-    {
-      jsonrpc: "2.0",
-      id: id ?? null,
-      error: { code, message },
-    },
+    { jsonrpc: "2.0", id: id ?? null, error },
     { headers: corsHeaders(origin) },
   );
+}
+
+// A2A method names per protocol version, mapped to the operation.
+const METHODS: Record<string, { dialect: Dialect; op: string }> = {
+  SendMessage: { dialect: "1.0", op: "send" },
+  SendStreamingMessage: { dialect: "1.0", op: "stream" },
+  GetTask: { dialect: "1.0", op: "get" },
+  ListTasks: { dialect: "1.0", op: "list" },
+  CancelTask: { dialect: "1.0", op: "cancel" },
+  SubscribeToTask: { dialect: "1.0", op: "subscribe" },
+  CreateTaskPushNotificationConfig: { dialect: "1.0", op: "push" },
+  GetTaskPushNotificationConfig: { dialect: "1.0", op: "push" },
+  ListTaskPushNotificationConfigs: { dialect: "1.0", op: "push" },
+  DeleteTaskPushNotificationConfig: { dialect: "1.0", op: "push" },
+  GetExtendedAgentCard: { dialect: "1.0", op: "extended_card" },
+  "message/send": { dialect: "0.3", op: "send" },
+  "message/stream": { dialect: "0.3", op: "stream" },
+  "tasks/get": { dialect: "0.3", op: "get" },
+  "tasks/cancel": { dialect: "0.3", op: "cancel" },
+  "tasks/resubscribe": { dialect: "0.3", op: "subscribe" },
+  "tasks/pushNotificationConfig/set": { dialect: "0.3", op: "push" },
+  "tasks/pushNotificationConfig/get": { dialect: "0.3", op: "push" },
+  "tasks/pushNotificationConfig/list": { dialect: "0.3", op: "push" },
+  "tasks/pushNotificationConfig/delete": { dialect: "0.3", op: "push" },
+  "agent/getAuthenticatedExtendedCard": { dialect: "0.3", op: "extended_card" },
+};
+
+/** Requested version from A2A-Version (§3.6.2: absent = 0.3); null
+ *  when it names a version this agent does not serve. */
+function requestedDialect(header: string | null): Dialect | null {
+  if (!header || !header.trim()) return "0.3";
+  const versions = header.split(",").map((v) => v.trim());
+  if (versions.some((v) => /^1(\.\d+)*$/.test(v))) return "1.0";
+  if (versions.some((v) => /^0\.3(\.\d+)*$/.test(v))) return "0.3";
+  return null;
+}
+
+/** The answer as a Message, in the caller's protocol version. The
+ *  agent is stateless (nothing to poll, cancel or subscribe to), so it
+ *  replies with a Message rather than a Task (A2A 1.0 §3.1.1 allows
+ *  either; a Task would promise a GetTask the agent cannot honor). */
+function answerMessage(dialect: Dialect, text: string, contextId: string) {
+  const messageId = crypto.randomUUID();
+  if (dialect === "1.0") {
+    return {
+      message: { messageId, contextId, role: "ROLE_AGENT", parts: [{ text }] },
+    };
+  }
+  return {
+    kind: "message",
+    messageId,
+    contextId,
+    role: "agent",
+    parts: [{ kind: "text", text }],
+  };
 }
 
 function jsonRpcResult(
@@ -150,7 +246,9 @@ function corsHeaders(origin: string | null): Record<string, string> {
   const allowed = originAllowed(origin);
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type",
+    // A2A-Version / A2A-Extensions are the 1.0 service parameters
+    // clients send as HTTP headers; browsers preflight on them.
+    "access-control-allow-headers": "content-type, a2a-version, a2a-extensions",
     "access-control-max-age": "86400",
     // Tell shared caches / CDNs that responses vary by Origin so the
     // allowlist decision isn't cached against the wrong requester.
@@ -344,13 +442,45 @@ export default {
         return jsonRpcError(id, -32600, "invalid request: jsonrpc must be '2.0'", origin);
       }
 
-      if (body.method !== "message/send") {
+      const found = typeof body.method === "string" ? METHODS[body.method] : undefined;
+      if (!found) {
+        return jsonRpcError(id, -32601, `method not found: ${String(body.method)}`, origin);
+      }
+      const { dialect, op } = found;
+      const versionHeader = req.headers.get("a2a-version");
+      const requested = requestedDialect(versionHeader);
+      if (requested === null) {
         return jsonRpcError(
           id,
-          -32601,
-          `method not implemented: ${String(body.method)}`,
+          -32009,
+          `A2A-Version ${versionHeader} is not supported; this agent serves 1.0 and 0.3`,
+          origin,
+          dialect,
+        );
+      }
+      if (dialect === "1.0" && requested !== "1.0") {
+        return jsonRpcError(
+          id,
+          -32009,
+          `${body.method} is an A2A 1.0 method; send the header A2A-Version: 1.0 ` +
+            "(an absent header means 0.3, A2A 1.0 §3.6.2)",
           origin,
         );
+      }
+      // Capability errors the spec mandates for what the card does not
+      // advertise (§3.3.4), and TaskNotFound for task lookups (answers
+      // are not stored).
+      if (op === "stream" || op === "subscribe" || op === "extended_card") {
+        return jsonRpcError(id, -32004, `${body.method} is not supported by this agent`, origin, dialect);
+      }
+      if (op === "push") {
+        return jsonRpcError(id, -32003, "push notifications are not supported by this agent", origin, dialect);
+      }
+      if (op === "list") {
+        return jsonRpcResult(id, { tasks: [], nextPageToken: "", pageSize: 0, totalSize: 0 }, origin);
+      }
+      if (op === "get" || op === "cancel") {
+        return jsonRpcError(id, -32001, "task not found (this agent creates no tasks)", origin, dialect);
       }
 
       const userText = extractUserText(body.params);
@@ -360,6 +490,7 @@ export default {
           -32602,
           "invalid params: no text part found in message.parts",
           origin,
+          dialect,
         );
       }
 
@@ -379,33 +510,9 @@ export default {
           | undefined;
         const responseContextId =
           params?.message?.contextId ?? crypto.randomUUID();
-        return jsonRpcResult(
-          id,
-          {
-            id: crypto.randomUUID(),
-            contextId: responseContextId,
-            status: {
-              // ProtoJSON enum encoding (§5.5): SCREAMING_SNAKE_CASE
-              // names of the TaskState protobuf enum (§4.1.3).
-              state: "TASK_STATE_COMPLETED",
-              // ISO 8601 UTC with 'Z' suffix (§5.6.1). ListTasks
-              // ordering depends on this field.
-              timestamp: new Date().toISOString(),
-            },
-            message: {
-              role: "ROLE_AGENT",
-              parts: [
-                {
-                  kind: "text",
-                  text: canonicalText,
-                },
-              ],
-            },
-          },
-          origin,
-        );
+        return jsonRpcResult(id, answerMessage(dialect, canonicalText, responseContextId), origin);
       } catch (err) {
-        return jsonRpcError(id, -32000, (err as Error).message, origin);
+        return jsonRpcError(id, -32603, (err as Error).message, origin, dialect);
       }
     }
 

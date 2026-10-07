@@ -1,20 +1,35 @@
-// Task lifecycle, tasks/get, tasks/cancel, tasks/list, and multi-turn
+// Task lifecycle, GetTask, CancelTask, ListTasks, and multi-turn
 // contextId contracts. Browser-side mirror of the
 // `task_*.py` / `tasks_*.py` / `task_context_id_echoed.py` modules.
+// Every probe goes through AgentProbe, i.e. in the A2A version the
+// agent's card advertises; 0.3 results are normalized to 1.0 first.
 
-import { assert, jsonRpcCall } from '../transport';
+import { assert } from '../transport';
 import type { Contract } from '../types';
 import {
+  AgentProbe,
+  errorCode,
+  LONG_TASK_TEXT,
+  METHOD_NOT_FOUND_CODE,
+  TASK_NOT_CANCELABLE_CODE,
+} from './_probe';
+import {
   looksLikeTask,
-  probeForTask,
   TASK_NOT_FOUND_CODE,
   TERMINAL_TASK_STATES,
   VALID_TASK_STATES,
 } from './_task_helpers';
 
+/** Task-producing probe: a vanilla send in the agent's dialect. */
+async function probeForTask(agentUrl: string, opts: { contextId?: string } = {}) {
+  const probe = await AgentProbe.create(agentUrl);
+  return probe.sendForTask(opts);
+}
+
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const TS_VALID = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const RECOGNIZED_ROLES = new Set(['user', 'agent', 'ROLE_USER', 'ROLE_AGENT']);
+// 1.0 ProtoJSON enum names; 0.3 "user"/"agent" are normalized before this check.
+const RECOGNIZED_ROLES = new Set(['ROLE_USER', 'ROLE_AGENT']);
 
 // ---------------------------------------------------------------------------
 // Task lifecycle (§3.4 + §4.1.1 + §4.1.3 + §4.1.4 + §4.1.5)
@@ -136,74 +151,86 @@ export const taskArtifactsShape: Contract = {
 export const tasksGetReturnsTask: Contract = {
   id: 'transport.tasks_get_returns_task',
   specSection: '§3.1.3',
-  description: 'tasks/get returns the Task identified by id.',
+  description: 'GetTask returns the Task identified by id.',
   category: 'transport',
   async verify(agentUrl) {
-    const seed = await probeForTask(agentUrl);
+    const probe = await AgentProbe.create(agentUrl);
+    const seed = await probe.sendForTask();
     if (!seed) return 'skipped — agent did not return a Task envelope';
-    const { body } = await jsonRpcCall(
-      agentUrl,
-      'tasks/get',
-      { id: seed.id },
-      `tg-${Math.random().toString(36).slice(2, 8)}`,
-    );
-    const env = (body ?? {}) as Record<string, unknown>;
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement tasks/get (-32601)';
+    const env = await probe.call('get', { id: seed.id });
+    if (errorCode(env) === METHOD_NOT_FOUND_CODE) {
+      return `skipped — agent does not implement ${probe.method('get')} (-32601)`;
     }
-    const result = env.result;
-    assert(looksLikeTask(result), 'tasks/get MUST return a Task object');
+    const result = probe.taskOf(env.result);
+    assert(looksLikeTask(result), `${probe.method('get')} MUST return a Task object`);
     assert(
-      (result as { id: string }).id === seed.id,
-      `tasks/get returned id ${JSON.stringify((result as { id: string }).id)} but requested ${JSON.stringify(seed.id)}`,
+      result.id === seed.id,
+      `${probe.method('get')} returned id ${JSON.stringify(result.id)} but requested ${JSON.stringify(seed.id)}`,
     );
   },
 };
 
+async function expectTaskNotFound(
+  probe: AgentProbe,
+  op: 'get' | 'cancel',
+  label: string,
+): Promise<undefined | string> {
+  const bogus = crypto.randomUUID();
+  const env = await probe.call(op, { id: bogus });
+  const error = env.error as Record<string, unknown> | undefined;
+  if (errorCode(env) === METHOD_NOT_FOUND_CODE) {
+    return `skipped — agent does not implement ${probe.method(op)} (-32601)`;
+  }
+  if ('result' in env && !error) {
+    throw new Error(
+      `${probe.method(op)} returned a result for bogus id ${bogus}; spec mandates ` +
+        `TaskNotFoundError (${TASK_NOT_FOUND_CODE})`,
+    );
+  }
+  const code = error?.code;
+  if (code === TASK_NOT_FOUND_CODE) return;
+  return (
+    `agent rejected ${label} (good) but with code ${code} ` +
+    `(${error?.message ?? '?'}); spec mandates ${TASK_NOT_FOUND_CODE}`
+  );
+}
+
 export const tasksGetNotFound: Contract = {
   id: 'transport.tasks_get_not_found',
   specSection: '§3.1.3',
-  description: 'tasks/get on an unknown id returns TaskNotFoundError.',
+  description: 'GetTask on an unknown id returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
-    const bogus = crypto.randomUUID();
-    const { body } = await jsonRpcCall(agentUrl, 'tasks/get', { id: bogus }, 'tgnf-1');
-    const env = (body ?? {}) as Record<string, unknown>;
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement tasks/get (-32601)';
-    }
-    if ('result' in env && !error) {
-      throw new Error(
-        `tasks/get returned a result for bogus id ${bogus}; spec mandates ` +
-          `TaskNotFoundError (${TASK_NOT_FOUND_CODE})`,
-      );
-    }
-    const code = error?.code;
-    if (code === TASK_NOT_FOUND_CODE) return;
-    return (
-      `agent rejected unknown taskId (good) but with code ${code} ` +
-      `(${error?.message ?? '?'}); spec mandates ${TASK_NOT_FOUND_CODE}`
-    );
+    return expectTaskNotFound(await AgentProbe.create(agentUrl), 'get', 'unknown taskId');
   },
 };
 
 export const tasksCancelSetsCanceled: Contract = {
   id: 'transport.tasks_cancel_sets_canceled',
   specSection: '§3.1.5',
-  description: 'tasks/cancel transitions the task to TASK_STATE_CANCELED.',
+  description: 'CancelTask transitions a running task to TASK_STATE_CANCELED.',
   category: 'transport',
   async verify(agentUrl) {
-    const seed = await probeForTask(agentUrl);
+    const probe = await AgentProbe.create(agentUrl);
+    // A completed task is not cancelable (§3.1.5): start one that
+    // returns immediately and is still busy when the cancel arrives.
+    const seed = await probe.sendForTask({ text: LONG_TASK_TEXT, blocking: false });
     if (!seed) return 'skipped — agent did not return a Task envelope';
-    const { body } = await jsonRpcCall(agentUrl, 'tasks/cancel', { id: seed.id }, 'tc-1');
-    const env = (body ?? {}) as Record<string, unknown>;
+    if (TERMINAL_TASK_STATES.has(seed.status.state)) {
+      return 'skipped — task was already terminal when the send returned; nothing to cancel';
+    }
+    const env = await probe.call('cancel', { id: seed.id });
     const error = env.error as Record<string, unknown> | undefined;
     if (error) {
       const code = error.code;
-      if (code === -32601) {
-        return 'skipped — agent does not implement tasks/cancel (-32601)';
+      if (code === METHOD_NOT_FOUND_CODE) {
+        return `skipped — agent does not implement ${probe.method('cancel')} (-32601)`;
+      }
+      if (code === TASK_NOT_CANCELABLE_CODE) {
+        return (
+          'agent returned TaskNotCancelableError — permitted when the task ' +
+          'finished before the cancel arrived; cannot verify state'
+        );
       }
       if (code === TASK_NOT_FOUND_CODE) {
         return (
@@ -211,11 +238,13 @@ export const tasksCancelSetsCanceled: Contract = {
           'task is already canceled and purged; cannot verify state'
         );
       }
-      throw new Error(`tasks/cancel failed with code ${code} (${error.message ?? '?'})`);
+      throw new Error(
+        `${probe.method('cancel')} failed with code ${code} (${error.message ?? '?'})`,
+      );
     }
-    const result = env.result;
-    assert(looksLikeTask(result), 'tasks/cancel result MUST be the updated Task');
-    const state = (result as { status: { state: string } }).status.state;
+    const result = probe.taskOf(env.result);
+    assert(looksLikeTask(result), `${probe.method('cancel')} result MUST be the updated Task`);
+    const state = result.status.state;
     if (state === 'TASK_STATE_CANCELED') return;
     if (TERMINAL_TASK_STATES.has(state)) {
       return (
@@ -224,7 +253,7 @@ export const tasksCancelSetsCanceled: Contract = {
       );
     }
     throw new Error(
-      `after tasks/cancel, Task.status.state is ${JSON.stringify(state)}; ` +
+      `after ${probe.method('cancel')}, Task.status.state is ${JSON.stringify(state)}; ` +
         'expected TASK_STATE_CANCELED',
     );
   },
@@ -233,49 +262,33 @@ export const tasksCancelSetsCanceled: Contract = {
 export const tasksCancelNotFound: Contract = {
   id: 'transport.tasks_cancel_not_found',
   specSection: '§3.1.5',
-  description: 'tasks/cancel on an unknown id returns TaskNotFoundError.',
+  description: 'CancelTask on an unknown id returns TaskNotFoundError.',
   category: 'transport',
   async verify(agentUrl) {
-    const bogus = crypto.randomUUID();
-    const { body } = await jsonRpcCall(agentUrl, 'tasks/cancel', { id: bogus }, 'tcnf-1');
-    const env = (body ?? {}) as Record<string, unknown>;
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement tasks/cancel (-32601)';
-    }
-    if ('result' in env && !error) {
-      throw new Error(
-        `tasks/cancel returned a result for bogus id ${bogus}; spec mandates ` +
-          `TaskNotFoundError (${TASK_NOT_FOUND_CODE})`,
-      );
-    }
-    const code = error?.code;
-    if (code === TASK_NOT_FOUND_CODE) return;
-    return (
-      `agent rejected cancel of unknown id (good) but with code ${code} ` +
-      `(${error?.message ?? '?'}); spec mandates ${TASK_NOT_FOUND_CODE}`
-    );
+    return expectTaskNotFound(await AgentProbe.create(agentUrl), 'cancel', 'cancel of unknown id');
   },
 };
 
 export const tasksListSortedDesc: Contract = {
   id: 'transport.tasks_list_sorted_desc',
   specSection: '§3.1.4',
-  description: 'tasks/list returns tasks sorted descending by status.timestamp.',
+  description: 'ListTasks returns tasks sorted descending by status.timestamp.',
   category: 'transport',
   async verify(agentUrl) {
-    const first = await probeForTask(agentUrl);
+    const probe = await AgentProbe.create(agentUrl);
+    const first = await probe.sendForTask();
     if (!first) return 'skipped — agent did not return a Task envelope';
-    await probeForTask(agentUrl);
-    const { body } = await jsonRpcCall(agentUrl, 'tasks/list', {}, 'tl-1');
-    const env = (body ?? {}) as Record<string, unknown>;
-    const error = env.error as Record<string, unknown> | undefined;
-    if (error?.code === -32601) {
-      return 'skipped — agent does not implement tasks/list (-32601)';
+    await probe.sendForTask();
+    const env = await probe.call('list', {});
+    if (errorCode(env) === METHOD_NOT_FOUND_CODE) {
+      return probe.isLegacy
+        ? 'skipped — A2A 0.3 defines no task-list method (tasks/list → -32601)'
+        : `skipped — agent does not implement ${probe.method('list')} (-32601)`;
     }
     const result = env.result;
-    const tasks = Array.isArray(result) ? result : (result as { tasks?: unknown })?.tasks;
-    assert(Array.isArray(tasks), 'tasks/list result MUST contain a `tasks` array');
+    const raw = Array.isArray(result) ? result : (result as { tasks?: unknown })?.tasks;
+    assert(Array.isArray(raw), `${probe.method('list')} result MUST contain a \`tasks\` array`);
+    const tasks = raw.map((t) => probe.taskOf(t));
     if (tasks.length < 2) {
       return `only ${tasks.length} task(s) returned; can't verify sort`;
     }
@@ -284,14 +297,14 @@ export const tasksListSortedDesc: Contract = {
       const ts = (t as { status?: { timestamp?: unknown } })?.status?.timestamp;
       assert(
         typeof ts === 'string' && ts,
-        `tasks/list[${i}].status.timestamp is REQUIRED for sort`,
+        `${probe.method('list')}[${i}].status.timestamp is REQUIRED for sort`,
       );
       stamps.push(ts);
     });
     for (let i = 0; i < stamps.length - 1; i++) {
       assert(
         stamps[i] >= stamps[i + 1],
-        `tasks/list not sorted descending at index ${i}: ${stamps[i]} < ${stamps[i + 1]}`,
+        `${probe.method('list')} not sorted descending at index ${i}: ${stamps[i]} < ${stamps[i + 1]}`,
       );
     }
   },

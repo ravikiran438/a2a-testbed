@@ -27,7 +27,16 @@ import { BUILTIN_SCENARIOS, type BuiltinScenarioDef, findBuiltin } from './built
 import { CloudflareAnalytics } from './CloudflareAnalytics';
 import { CustomScenarioPanel } from './CustomScenarioPanel';
 import { ALL_CONTRACTS } from './conformance/contracts';
+import {
+  type Dialect,
+  detectDialect,
+  method as dialectMethod,
+  requestHeaders,
+  sendParams,
+  textMessage,
+} from './conformance/dialect';
 import { CHUNK_SIZE, runConformanceChunk, summarize } from './conformance/runner';
+import { setPinnedProtocolVersion } from './conformance/transport';
 import type { ContractResult } from './conformance/types';
 import { HomePage } from './HomePage';
 import { Inspector, type InspectorTarget, type StepRunResult } from './Inspector';
@@ -262,15 +271,44 @@ interface ExternalStepOutcome {
   error?: string;
 }
 
+/** Protocol version to speak to an agent, from its card (cached per
+ *  page load). Mirrors the CLI scenario runner's negotiation. */
+const agentDialects = new Map<string, Promise<Dialect>>();
+
+function agentDialect(agentUrl: string): Promise<Dialect> {
+  const key = agentUrl.replace(/\/$/, '');
+  let cached = agentDialects.get(key);
+  if (!cached) {
+    cached = fetch(`${key}/.well-known/agent-card.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((card) => detectDialect(card))
+      .catch(() => '1.0' as Dialect);
+    agentDialects.set(key, cached);
+  }
+  return cached;
+}
+
+function sendRequest(dialect: Dialect, jsonRpcId: number, text: string) {
+  return {
+    jsonrpc: '2.0',
+    id: jsonRpcId,
+    method: dialectMethod(dialect, 'send'),
+    params: sendParams(dialect, textMessage(dialect, text)),
+  };
+}
+
 /**
- * POST an A2A JSON-RPC `message/send` to the agent's URL and
- * evaluate `expect.response_status` + `expect.response_contains`
- * against the raw response body.
+ * POST an A2A JSON-RPC send to the agent's URL — `SendMessage` with
+ * `A2A-Version: 1.0`, or `message/send` when the agent's card is A2A
+ * 0.3 — and evaluate `expect.response_status` +
+ * `expect.response_contains` against the raw response body.
  *
  * Mirrors the CLI's checks (a2a_testbed/runtime/scenario.py): the
  * matchers are literal substrings against the raw HTTP body, so
  * a YAML like `response_contains: '\"answer\": 84'` works
- * identically here and in the CLI.
+ * identically here and in the CLI. Like the CLI, a 1.0 request
+ * answered with MethodNotFound is retried with the 0.3 method name
+ * (the card overstates its version) and the step says so.
  */
 async function executeExternalStep(
   agentUrl: string,
@@ -286,24 +324,29 @@ async function executeExternalStep(
       : step.action;
 
   const endpoint = `${agentUrl.replace(/\/$/, '')}/a2a/v1/`;
-  const requestBody = {
-    jsonrpc: '2.0',
-    id: jsonRpcId,
-    method: 'message/send',
-    params: {
-      message: {
-        parts: [{ kind: 'text', text: userText }],
-      },
-    },
-  };
+  const dialect = await agentDialect(agentUrl);
+  const post = (d: Dialect) =>
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...requestHeaders(d) },
+      body: JSON.stringify(sendRequest(d, jsonRpcId, userText)),
+    });
 
   let res: Response;
+  let fallbackNote = '';
   try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    res = await post(dialect);
+    if (dialect === '1.0') {
+      const probe = await res
+        .clone()
+        .json()
+        .catch(() => null);
+      if ((probe as { error?: { code?: unknown } } | null)?.error?.code === -32601) {
+        res = await post('0.3');
+        fallbackNote =
+          'agent card advertises A2A 1.0 but the agent only served A2A 0.3 method names; fell back';
+      }
+    }
   } catch (err) {
     return {
       ok: false,
@@ -323,6 +366,7 @@ async function executeExternalStep(
   const bodyText = await res.text();
   const expect = (step.expect ?? {}) as Record<string, unknown>;
   const checks: StepRunResult['checks'] = [];
+  if (fallbackNote) checks.push({ name: 'protocol_version', ok: true, detail: fallbackNote });
 
   // response_status: '2xx' / '3xx' / '4xx' / '5xx' OR an exact code.
   const expectedStatus = expect.response_status;
@@ -711,6 +755,9 @@ export default function App() {
     () => new Map(),
   );
   const [conformanceRunning, setConformanceRunning] = useState(false);
+  // A2A version the sweep probes with: negotiated from each agent's card
+  // ('auto') or pinned, like the CLI's --protocol-version.
+  const [conformanceVersion, setConformanceVersion] = useState<'auto' | Dialect>('auto');
   // Banner shown while an advance_time step is active. Carries the
   // virtual-clock delta in seconds so the UI can format it as
   // "+1 hour" / "+1 day" / etc. Cleared between steps.
@@ -719,7 +766,7 @@ export default function App() {
     seconds: number;
   } | null>(null);
   // Per-URL index of the next contract to run. Drives the chunked
-  // "Run next batch" flow — sweeping all 58 in one burst can trip
+  // "Run next batch" flow — sweeping all 62 in one burst can trip
   // an external agent's per-IP rate limit, so the user paces it.
   const [conformanceProgress, setConformanceProgress] = useState<Map<string, number>>(
     () => new Map(),
@@ -1098,7 +1145,7 @@ export default function App() {
     setActiveStep(null);
     setPhase('done');
     // Conformance is now user-triggered (chunked, one batch at a
-    // time) instead of auto-running here — bursting all 58 contracts
+    // time) instead of auto-running here — bursting all 62 contracts
     // back-to-back can trip an external agent's per-IP rate limit.
   }, [showObserver, activeScenario, acsEnabled, acsEnforce, acsManifest]);
 
@@ -1696,7 +1743,7 @@ export default function App() {
                     <span className="conformance-chevron" aria-hidden="true">
                       ▾
                     </span>
-                    <span className="conformance-title">A2A 1.0 conformance</span>
+                    <span className="conformance-title">A2A conformance (1.0 · 0.3)</span>
                     {/* Header summary visible whether expanded or not.
                         Lets users see the verdict without expanding. */}
                     {conformanceResults.size > 0 && !conformanceRunning && (
@@ -1747,6 +1794,21 @@ export default function App() {
                             verdict. Paced in batches of {CHUNK_SIZE} so a sweep stays inside the
                             target agent's rate-limit window.
                           </p>
+                          <label className="conformance-version">
+                            A2A version{' '}
+                            <select
+                              value={conformanceVersion}
+                              onChange={(e) => {
+                                const v = e.target.value as 'auto' | Dialect;
+                                setConformanceVersion(v);
+                                setPinnedProtocolVersion(v === 'auto' ? null : v);
+                              }}
+                            >
+                              <option value="auto">from the AgentCard</option>
+                              <option value="1.0">1.0</option>
+                              <option value="0.3">0.3 (legacy)</option>
+                            </select>
+                          </label>
                           <button
                             type="button"
                             className="conformance-run-btn"

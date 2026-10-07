@@ -30,6 +30,9 @@ from a2a_testbed.contracts.network.observer_receives_traffic import (
 from a2a_testbed.contracts.network.time_advance_visibility import (
     make_time_advance_visibility_contract,
 )
+from a2a_testbed.contracts.transport.advertised_version_served import (
+    make_advertised_version_served_contract,
+)
 from a2a_testbed.contracts.transport.agent_card_capabilities_object import (
     make_agent_card_capabilities_contract,
 )
@@ -129,6 +132,9 @@ from a2a_testbed.contracts.transport.push_set_task_not_found import (
 from a2a_testbed.contracts.transport.send_message_required_fields import (
     make_send_message_required_fields_contract,
 )
+from a2a_testbed.contracts.transport.send_message_result_shape import (
+    make_send_message_result_shape_contract,
+)
 from a2a_testbed.contracts.transport.signatures_well_formed import (
     make_signatures_well_formed_contract,
 )
@@ -143,6 +149,9 @@ from a2a_testbed.contracts.transport.streaming_event_kinds import (
 )
 from a2a_testbed.contracts.transport.streaming_first_event_is_task import (
     make_streaming_first_event_is_task_contract,
+)
+from a2a_testbed.contracts.transport.streaming_jsonrpc_framing import (
+    make_streaming_jsonrpc_framing_contract,
 )
 from a2a_testbed.contracts.transport.streaming_response_content_type import (
     make_streaming_response_content_type_contract,
@@ -201,6 +210,9 @@ from a2a_testbed.contracts.transport.tasks_get_returns_task import (
 from a2a_testbed.contracts.transport.tasks_list_sorted_desc import (
     make_tasks_list_sorted_desc_contract,
 )
+from a2a_testbed.contracts.transport.version_not_supported import (
+    make_version_not_supported_contract,
+)
 from a2a_testbed.contracts.transport.well_known_card import (
     make_well_known_card_contract,
 )
@@ -230,6 +242,9 @@ def transport_contracts(transport: Transport, agent_url: str) -> list[Contract]:
         make_signatures_well_formed_contract(transport, agent_url),
         # Versioning (§3.6)
         make_agent_card_protocol_version_format_contract(transport, agent_url),
+        # Version negotiation (§3.6.2, §9.1)
+        make_advertised_version_served_contract(transport, agent_url),
+        make_version_not_supported_contract(transport, agent_url),
         # Security & transport (§7.1, §7.3)
         make_agent_card_https_urls_contract(transport, agent_url),
         make_agent_card_security_schemes_contract(transport, agent_url),
@@ -244,6 +259,7 @@ def transport_contracts(transport: Transport, agent_url: str) -> list[Contract]:
         make_jsonrpc_error_code_range_contract(transport, agent_url),
         make_method_not_found_contract(transport, agent_url),
         make_send_message_required_fields_contract(transport, agent_url),
+        make_send_message_result_shape_contract(transport, agent_url),
         # Error envelope (§3.3.2)
         make_error_data_atype_contract(transport, agent_url),
         # Capability ↔ method consistency (§3.1.2, §3.5, §3.1.7)
@@ -266,6 +282,7 @@ def transport_contracts(transport: Transport, agent_url: str) -> list[Contract]:
         make_task_context_id_echoed_contract(transport, agent_url),
         # Streaming SSE (§3.1.2, §4.1.6, §4.1.7)
         make_streaming_response_content_type_contract(transport, agent_url),
+        make_streaming_jsonrpc_framing_contract(transport, agent_url),
         make_streaming_first_event_is_task_contract(transport, agent_url),
         make_streaming_event_kinds_contract(transport, agent_url),
         make_streaming_status_update_shape_contract(transport, agent_url),
@@ -311,9 +328,7 @@ async def run_contracts(
     return results
 
 
-async def run_transport_contracts(
-    transport: Transport, agent_url: str
-) -> list[ContractResult]:
+async def run_transport_contracts(transport: Transport, agent_url: str) -> list[ContractResult]:
     """Run every spec-derived transport contract against one agent."""
     return await run_contracts(transport_contracts(transport, agent_url))
 

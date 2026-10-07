@@ -3,10 +3,10 @@
 
 """Transport contract: JSON-RPC response carries exactly one of result or error.
 
-  Spec:    JSON-RPC 2.0 §5 (Response Object)
-  Source:  https://www.jsonrpc.org/specification#response_object
-  Clause:  "Either the result member or error member MUST be included,
-           but both members MUST NOT be included."
+Spec:    JSON-RPC 2.0 §5 (Response Object)
+Source:  https://www.jsonrpc.org/specification#response_object
+Clause:  "Either the result member or error member MUST be included,
+         but both members MUST NOT be included."
 """
 
 from __future__ import annotations
@@ -16,12 +16,11 @@ import json
 import httpx
 
 from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.transport._task_helpers import AgentProbe
 from a2a_testbed.transport import Transport, WireMessage
 
 
-def make_jsonrpc_result_xor_error_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_jsonrpc_result_xor_error_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> None:
         wire = WireMessage(
             sender_id="contract",
@@ -30,10 +29,11 @@ def make_jsonrpc_result_xor_error_contract(
             text="xor probe",
             metadata={"request_id": "contract-xor-probe"},
         )
-        payload = transport.encode_request(wire)
+        probe = await AgentProbe.create(transport, agent_url)
+        payload = transport.encode_request(wire, protocol_version=probe.dialect.value)
         url = agent_url.rstrip("/") + transport.rpc_endpoint_path()
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=probe.headers())
         body = json.loads(resp.text)
         has_result = "result" in body
         has_error = "error" in body
@@ -46,9 +46,7 @@ def make_jsonrpc_result_xor_error_contract(
 
     return Contract(
         id="transport.jsonrpc_result_xor_error",
-        description=(
-            "JSON-RPC response carries exactly one of result/error per §5"
-        ),
+        description=("JSON-RPC response carries exactly one of result/error per §5"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

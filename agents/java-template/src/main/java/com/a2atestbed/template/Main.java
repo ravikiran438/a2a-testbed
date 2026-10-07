@@ -5,9 +5,13 @@
 //
 // Reads CLI args --agent-card, --scripts, --port; binds an HTTP server on
 // 127.0.0.1; serves the AgentCard at the well-known URL and a minimal
-// JSON-RPC message/send endpoint. Prints "A2A_TESTBED_READY: <url>" on
+// JSON-RPC send endpoint. Prints "A2A_TESTBED_READY: <url>" on
 // stdout when listening. Mirrors agents/nodejs-template/index.js so the
 // cross-SDK polyglot story includes Java.
+//
+// Speaks A2A 1.0 (SendMessage with A2A-Version: 1.0; replies
+// {"message": {...}} with ROLE_AGENT and oneof parts) and still answers
+// A2A 0.3 callers (message/send; bare Message with kind discriminators).
 //
 // JDK stdlib only (com.sun.net.httpserver + java.util.regex) — no JSON
 // library — so it builds into a single dependency-free jar. Real agents
@@ -93,25 +97,44 @@ public final class Main {
                 "null");
         String rpcMethod = firstGroupOr(body, "\"method\"\\s*:\\s*\"([^\"]+)\"", "");
 
-        if (!"message/send".equals(rpcMethod)) {
+        boolean v1 = "SendMessage".equals(rpcMethod);
+        if (!v1 && !"message/send".equals(rpcMethod)) {
             writeJson(exchange, 200, "{\"jsonrpc\":\"2.0\",\"id\":" + id
                     + ",\"error\":{\"code\":-32601,\"message\":\"unknown method "
                     + escape(rpcMethod) + "\"}}");
             return;
         }
+        if (v1 && !requestsV1(exchange.getRequestHeaders().getFirst("A2A-Version"))) {
+            // A2A 1.0 §3.6.2: an absent header means 0.3, which has no SendMessage.
+            writeJson(exchange, 200, "{\"jsonrpc\":\"2.0\",\"id\":" + id
+                    + ",\"error\":{\"code\":-32009,\"message\":"
+                    + "\"SendMessage requires A2A-Version: 1.0\"}}");
+            return;
+        }
 
         String text = extractText(body);
-        String response = matchScript(text, scripts);
-        String out = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{"
-                + "\"kind\":\"message\","
-                + "\"messageId\":\"resp-" + stripQuotes(id) + "\","
-                + "\"role\":\"assistant\","
-                + "\"parts\":[{\"kind\":\"text\",\"text\":\""
-                + escape("[" + agentId + "] " + response) + "\"}]}}";
-        writeJson(exchange, 200, out);
+        String reply = escape("[" + agentId + "] " + matchScript(text, scripts));
+        String messageId = "\"messageId\":\"resp-" + stripQuotes(id) + "\",";
+        String result = v1
+                ? "{\"message\":{" + messageId
+                    + "\"role\":\"ROLE_AGENT\","
+                    + "\"parts\":[{\"text\":\"" + reply + "\"}]}}"
+                : "{\"kind\":\"message\"," + messageId
+                    + "\"role\":\"agent\","
+                    + "\"parts\":[{\"kind\":\"text\",\"text\":\"" + reply + "\"}]}";
+        writeJson(exchange, 200, "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result + "}");
     }
 
     // -- helpers ---------------------------------------------------------
+
+    /** True when an A2A-Version header names a 1.x version (absent = 0.3). */
+    private static boolean requestsV1(String header) {
+        if (header == null) return false;
+        for (String v : header.split(",")) {
+            if (v.trim().matches("1(\\.\\d+)*")) return true;
+        }
+        return false;
+    }
 
     /** Gather every "text":"..." value in the message and join with spaces. */
     private static String extractText(String body) {

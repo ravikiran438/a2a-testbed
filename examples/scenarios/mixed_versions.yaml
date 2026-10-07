@@ -1,0 +1,45 @@
+# Mixed-version network: an A2A 1.0 agent and an A2A 0.3 agent.
+#
+# The testbed negotiates the wire version per receiver from its
+# AgentCard: steps to `modern` go out as A2A 1.0 (SendMessage +
+# A2A-Version: 1.0), steps to `legacy` as A2A 0.3 (message/send, no
+# version header). The observer's tap records both dialects on the
+# wire, and the in-process `legacy` agent rejects 1.0 method names just
+# like a real pre-1.0 deployment would.
+
+name: "Mixed A2A versions (1.0 + 0.3)"
+description: |
+  A 1.0 agent and a 0.3 agent exchange requests in both directions over
+  one simulated network; every step must succeed in the receiver's own
+  protocol version.
+
+mode: sim
+
+agents:
+  - id: modern
+    card: ../agent-cards/mixed-versions/modern.json
+    runtime: python_inproc
+  - id: legacy
+    card: ../agent-cards/mixed-versions/legacy.json
+    runtime: python_inproc
+  - id: auditor
+    card: ../agent-cards/mixed-versions/modern.json
+    runtime: python_inproc
+    role: observer
+
+flow:
+  - from: modern
+    to: legacy
+    action: fulfil
+    message: "fulfil: order 42"
+    expect:
+      response_status: "2xx"
+      response_contains: "fulfil"
+
+  - from: legacy
+    to: modern
+    action: relay
+    message: "relay: order 42 fulfilled"
+    expect:
+      response_status: "2xx"
+      response_contains: "relay"

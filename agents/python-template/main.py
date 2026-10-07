@@ -6,8 +6,13 @@
 
 Reads CLI args ``--agent-card``, ``--scripts``, ``--port``; binds an HTTP
 server on 127.0.0.1; serves the AgentCard at the well-known URL and a
-minimal JSON-RPC ``message/send`` endpoint that matches the incoming
-text against the scripts map.
+minimal JSON-RPC send endpoint that matches the incoming text against
+the scripts map.
+
+Speaks A2A 1.0 (``SendMessage`` with ``A2A-Version: 1.0``; replies
+``{"message": {...}}`` with ``ROLE_AGENT`` and oneof parts) and still
+answers A2A 0.3 callers (``message/send``; replies a bare Message with
+``kind`` discriminators), so one endpoint serves both protocol versions.
 
 Prints exactly one line ``A2A_TESTBED_READY: http://127.0.0.1:<port>`` on
 stdout once it's listening so the orchestrator can discover the bound
@@ -20,8 +25,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -75,23 +80,34 @@ def make_handler(card: dict, scripts: dict[str, str], agent_id: str):
                 return
             method = payload.get("method")
             jsonrpc_id = payload.get("id")
-            if method != "message/send":
+            if method not in ("SendMessage", "message/send"):
                 self._jsonrpc_error(jsonrpc_id, -32601, f"unknown method {method!r}")
                 return
+            versions = [v.strip() for v in (self.headers.get("A2A-Version") or "").split(",")]
+            if method == "SendMessage" and not any(re.fullmatch(r"1(\.\d+)*", v) for v in versions):
+                # A2A 1.0 §3.6.2: an absent header means 0.3, which has no SendMessage.
+                self._jsonrpc_error(jsonrpc_id, -32009, "SendMessage requires A2A-Version: 1.0")
+                return
             text = _extract_text(payload.get("params"))
-            response = _match_script(text, scripts)
-            body = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": jsonrpc_id,
-                    "result": {
-                        "kind": "message",
+            reply_text = f"[{agent_id}] {_match_script(text, scripts)}"
+            if method == "SendMessage":
+                result = {
+                    "message": {
                         "messageId": f"resp-{jsonrpc_id}",
-                        "role": "assistant",
-                        "parts": [{"kind": "text", "text": f"[{agent_id}] {response}"}],
-                    },
+                        "role": "ROLE_AGENT",
+                        "parts": [{"text": reply_text}],
+                    }
                 }
-            ).encode("utf-8")
+            else:
+                result = {
+                    "kind": "message",
+                    "messageId": f"resp-{jsonrpc_id}",
+                    "role": "agent",
+                    "parts": [{"kind": "text", "text": reply_text}],
+                }
+            body = json.dumps({"jsonrpc": "2.0", "id": jsonrpc_id, "result": result}).encode(
+                "utf-8"
+            )
             self.send_response(200)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(body)))

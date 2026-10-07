@@ -49,6 +49,7 @@ import {
   streamingArtifactUpdateShape,
   streamingEventKinds,
   streamingFirstEventIsTask,
+  streamingJsonrpcFraming,
   streamingResponseContentType,
   streamingStatusUpdateShape,
   streamingTaskIdConsistency,
@@ -71,6 +72,7 @@ import {
   tasksGetReturnsTask,
   tasksListSortedDesc,
 } from './tasks';
+import { advertisedVersionServed, sendMessageResultShape, versionNotSupported } from './version';
 
 export const ALL_CONTRACTS: Contract[] = [
   // AgentCard discovery + structural shape (§4.4, §8)
@@ -91,6 +93,9 @@ export const ALL_CONTRACTS: Contract[] = [
   signaturesWellFormed,
   // Versioning (§3.6)
   agentCardProtocolVersionFormat,
+  // Version negotiation (§3.6.2, §9.1)
+  advertisedVersionServed,
+  versionNotSupported,
   // Transport-level security (§7.1, §7.3)
   agentCardHttpsUrls,
   agentCardSecuritySchemes,
@@ -105,6 +110,7 @@ export const ALL_CONTRACTS: Contract[] = [
   jsonrpcErrorCodeRange,
   methodNotFound,
   sendMessageRequiredFields,
+  sendMessageResultShape,
   // Error envelope (§3.3.2)
   errorDataAtype,
   // Capability ↔ method consistency (§3.1.2, §3.5, §3.1.7)
@@ -127,6 +133,7 @@ export const ALL_CONTRACTS: Contract[] = [
   taskContextIdEchoed,
   // Streaming SSE (§3.1.2, §4.1.6, §4.1.7)
   streamingResponseContentType,
+  streamingJsonrpcFraming,
   streamingFirstEventIsTask,
   streamingEventKinds,
   streamingStatusUpdateShape,

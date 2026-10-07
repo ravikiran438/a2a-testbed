@@ -1,67 +1,56 @@
 # Copyright 2026 Ravi Kiran Kadaboina
 # Licensed under the Apache License, Version 2.0.
 
-"""Transport contract: first SSE event of message/stream carries the Task.
+"""Transport contract: first SSE event of a stream carries the Task (or the Message).
 
-  Spec:    A2A 1.0 §3.1.2 (Send Streaming Message)
-  Source:  docs/specification.md (LF AI & Data A2A repo)
-  Clause:  Per the spec example (line 1376) the first SSE event of
-           a streaming response carries the full Task envelope:
-           ``data: {"task": {...}}``. Clients use this initial frame
-           to learn the task id (so they can request follow-ups via
-           ``tasks/get`` / ``tasks/cancel`` later) and the contextId
-           (so multi-turn flows can reuse the conversation handle).
+Spec:    A2A 1.0 §3.1.2 (Send Streaming Message)
+Source:  docs/specification.md (LF AI & Data A2A repo)
+Clause:  Per the spec example (line 1376) the first SSE event of
+         a streaming response carries the full Task envelope:
+         ``data: {"task": {...}}``. Clients use this initial frame
+         to learn the task id (so they can request follow-ups via
+         ``GetTask`` / ``CancelTask`` later) and the contextId
+         (so multi-turn flows can reuse the conversation handle).
 """
 
 from __future__ import annotations
 
-import uuid
-
 from a2a_testbed.contracts.base import Contract, ContractCategory
 from a2a_testbed.contracts.transport._task_helpers import (
-    fetch_card,
+    AgentProbe,
     looks_like_task,
-    stream_sse_events,
     streaming_skip_detail,
 )
 from a2a_testbed.transport import Transport
 
 
-def make_streaming_first_event_is_task_contract(
-    transport: Transport, agent_url: str
-) -> Contract:
+def make_streaming_first_event_is_task_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
-        card = await fetch_card(transport, agent_url)
-        skip = streaming_skip_detail(card)
+        probe = await AgentProbe.create(transport, agent_url)
+        skip = streaming_skip_detail(probe.card)
         if skip:
             return skip
-        events = await stream_sse_events(
-            transport,
-            agent_url,
-            "message/stream",
-            {
-                "message": {
-                    "messageId": str(uuid.uuid4()),
-                    "role": "user",
-                    "parts": [{"kind": "text", "text": "count: 1 first-event"}],
-                },
-            },
-        )
-        assert events, "message/stream emitted no SSE events"
+        events = await probe.stream("stream", probe.send_params("count: 1 first-event"))
+        assert events, f"{probe.method('stream')} emitted no SSE events"
         first = events[0]
-        # The spec example wraps the Task under a `task` key.
+        if isinstance(first, dict) and isinstance(first.get("message"), dict):
+            # Message-only stream (§3.1.2 pattern 1): exactly one Message.
+            assert len(events) == 1, (
+                f"message-only stream MUST contain exactly one Message and then "
+                f"close (§3.1.2); got {len(events)} events"
+            )
+            return "message-only stream (agent answered with a Message, not a Task)"
         task = first.get("task") if isinstance(first, dict) else None
         assert looks_like_task(task), (
-            "first SSE event MUST carry the Task envelope as "
-            f"`{{\"task\": {{...}}}}` (§3.1.2); got {list(first.keys()) if isinstance(first, dict) else type(first).__name__}"
+            'first SSE event MUST carry the Task (`{"task": {...}}`) or, for a '
+            "message-only stream, the Message (§3.1.2); got "
+            f"{list(first.keys()) if isinstance(first, dict) else type(first).__name__}"
         )
         return None
 
     return Contract(
         id="transport.streaming_first_event_is_task",
-        description=(
-            "First SSE event of message/stream carries the Task envelope (§3.1.2)"
-        ),
+        description=("First SSE event carries the Task (or the sole Message) (§3.1.2)"),
         category=ContractCategory.TRANSPORT,
         verify_fn=verify,
     )

@@ -1,0 +1,26 @@
+{
+  "name": "Modern Agent",
+  "description": "A2A 1.0 agent. Serves SendMessage (A2A-Version: 1.0) and, like the a2a-sdk with enable_v0_3_compat, still answers 0.3 message/send callers.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0",
+      "url": "http://127.0.0.1:0"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "skills": [
+    {
+      "id": "relay",
+      "name": "Relay",
+      "description": "Acknowledges relayed requests.",
+      "tags": ["relay"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"]
+}

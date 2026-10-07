@@ -21,7 +21,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "a2a-sdk[http-server]>=1.0.1",
+    "a2a-sdk[http-server]>=1.2.2",
     "httpx>=0.28",
     "jsonschema>=4.18",
     "mcp>=1.0",
@@ -95,9 +95,10 @@ name = "A2A"
 version = "1.0"
 # Pinned upstream commit. Increment via the CONTRIBUTING checklist;
 # never rebase forward without re-running the full contract sweep.
-commit = "ae6a562d5d972f2c4b184f748bb32e1fa9aa7bf2"
+# Tag v1.0.1 (the latest release; patch releases keep protocol version "1.0", §3.6).
+commit = "3303592588e388e62e0f69f701af531d2f4e3991"
 # Human date when this commit pin was last reviewed against the
 # implemented contract suite. ISO 8601, UTC.
-last_reviewed = "2026-05-05"
+last_reviewed = "2026-10-07"
 source_repo = "https://github.com/a2aproject/A2A"
 specification_path = "docs/specification.md"
