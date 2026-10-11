@@ -7,6 +7,13 @@ versions may include breaking changes).
 
 ## [Unreleased]
 
+## [0.3.0a3] — 2026-10-11
+
+### Changed
+
+- **GitHub Action description shortened** to fit the Marketplace's
+  125-character limit, so the Action can be listed there.
+
 ### Fixed
 
 - **The corrupt fault always changes the payload.** It shuffled the

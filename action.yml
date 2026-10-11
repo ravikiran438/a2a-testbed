@@ -1,8 +1,7 @@
 name: A2A conformance
 description: >-
-  Check an A2A agent against the A2A specification: sweep a live endpoint
-  and/or lint an AgentCard file, with SARIF, JUnit, JSON and job-summary
-  output and a baseline of accepted failures.
+  Check an A2A agent against the spec in CI: sweep a live endpoint or lint
+  an AgentCard. SARIF, JUnit and baseline support.
 author: Ravi Kiran Kadaboina
 branding:
   icon: check-circle

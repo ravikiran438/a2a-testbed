@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "a2a-testbed"
-version = "0.3.0a2"
+version = "0.3.0a3"
 description = "A polyglot, JSON-driven, multi-agent A2A network simulator with scenario runner, conformance contracts, Agent Control Specification (ACS) runtime governance, observer agents, time control, and failure injection."
 readme = "README.md"
 requires-python = ">=3.12"
