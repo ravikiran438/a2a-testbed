@@ -5,7 +5,25 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 aims to follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 versions may include breaking changes).
 
-## [0.3.0a2] — unreleased
+## [Unreleased]
+
+### Fixed
+
+- **The corrupt fault always changes the payload.** It shuffled the
+  pattern's characters, and a shuffle can reproduce the input (1 in 60 for
+  "hello"); a palindrome reversed to itself in the fallback path. The
+  fault was then a silent no-op, and `test_corrupt_mutates_payload` failed
+  intermittently.
+
+### Changed
+
+- **Website brought up to date** (a2a-testbed.com): install from PyPI, the
+  CI gate (GitHub Action, `conformance`, `lint-card`, baseline) and
+  extension checks on MCP servers; contract count corrected to 62; the
+  a2a-tck description no longer pins it to A2A 0.3.0. `llms.txt` and the
+  page's structured data follow.
+
+## [0.3.0a2] — 2026-10-11
 
 ### Fixed
 
@@ -15,11 +33,6 @@ versions may include breaking changes).
   start-up (the pinned `uvx --from git+...` PACE delegate) could not reach
   GitHub behind a proxy and every check failed with "MCP server
   unavailable (Connection closed)". `env:` entries still override.
-- **The corrupt fault always changes the payload.** It shuffled the
-  pattern's characters, and a shuffle can reproduce the input (1 in 60 for
-  "hello"); a palindrome reversed to itself in the fallback path. The
-  fault was then a silent no-op, and `test_corrupt_mutates_payload` failed
-  intermittently.
 
 ### Changed
 

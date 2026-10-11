@@ -14,7 +14,7 @@ interface Props {
 }
 
 interface ToolCard {
-  id: 'scenario' | 'validate' | 'acs' | 'agui' | 'polyglot' | 'live-llm';
+  id: 'scenario' | 'validate' | 'acs' | 'agui' | 'polyglot' | 'live-llm' | 'ci';
   title: string;
   body: string;
   cta: string;
@@ -83,6 +83,18 @@ const TOOLS: ToolCard[] = [
     badge: 'live HTTP',
   },
   {
+    id: 'ci',
+    title: 'Conformance gate for CI',
+    body:
+      'Run the 62 spec-cited A2A contracts against a preview deployment or ' +
+      'a local agent on every pull request, and lint the AgentCard file ' +
+      'without a server. GitHub Action or any CI via the CLI; SARIF, JUnit ' +
+      'and JSON reports, and a baseline file for known failures.',
+    cta: 'Read the CI guide',
+    external: 'https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ci.md',
+    badge: 'new',
+  },
+  {
     id: 'polyglot',
     title: 'Polyglot agents (CLI)',
     body:
@@ -125,7 +137,9 @@ const PAIN_POINTS: PainPoint[] = [
     solution:
       'A2A 1.0 specifies extension URIs but not how to validate the ' +
       'payload. The testbed proposes a manifest convention: each URI ' +
-      'serves a JSON Schema; a generic validator checks any payload.',
+      'serves a JSON Schema; a generic validator checks any payload. ' +
+      'Scenario steps can also check extension semantics on the ' +
+      "extension's own MCP server, failing closed.",
   },
   {
     problem: 'Runtime governance scattered across frameworks',
@@ -237,11 +251,11 @@ const REFERENCES: RefCard[] = [
   {
     name: 'a2aproject/a2a-tck',
     one_liner:
-      'Official Technology Compatibility Kit from the A2A project. ' +
-      'Single-agent compliance validator targeting A2A v0.3.0 with ' +
-      'multi-transport (JSON-RPC + gRPC + REST) equivalence testing. ' +
-      'The right tool for "is my agent A2A 1.0 compliant?" — this ' +
-      'testbed sits alongside it for multi-agent and extension testing.',
+      'Official Technology Compatibility Kit from the A2A project: a ' +
+      'single-agent compliance suite across the JSON-RPC, gRPC and ' +
+      'HTTP+JSON transports, aimed at SDK implementations. This testbed ' +
+      'sits alongside it: deployed agents, multi-agent flows, extensions ' +
+      'and governance.',
     href: 'https://github.com/a2aproject/a2a-tck',
     role: 'Single-agent compliance',
   },
@@ -306,6 +320,20 @@ export function HomePage({ onOpen, onOpenBuiltin, onOpenValidate }: Props) {
             Governance over AG-UI
           </button>
         </div>
+        <p className="hero-install">
+          <code>pip install a2a-testbed</code> or <code>uvx a2a-testbed</code> ·{' '}
+          <a href="https://pypi.org/project/a2a-testbed/" target="_blank" rel="noreferrer">
+            PyPI ↗
+          </a>{' '}
+          ·{' '}
+          <a
+            href="https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ci.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub Action ↗
+          </a>
+        </p>
       </section>
 
       <section className="tools">
@@ -553,6 +581,58 @@ export function HomePage({ onOpen, onOpenBuiltin, onOpenValidate }: Props) {
 
       <section className="generate-manifest">
         <div className="section-head-row">
+          <h2>Gate your agent in CI</h2>
+          <span className="experimental-badge">new</span>
+        </div>
+        <p className="why-lead">
+          The same conformance checks, on every pull request. Sweep a running agent (a preview
+          deployment, or one you start inside the job) and lint the AgentCard file with no server at
+          all. Failures show up in the job summary and in code scanning; known failures go in a
+          baseline file with a reason each.
+        </p>
+        <pre className="how-code">
+          {`# .github/workflows/a2a.yml
+- uses: ravikiran438/a2a-testbed@v0
+  with:
+    url: \${{ steps.deploy.outputs.preview_url }}   # a running agent
+    card: agent-card.json                           # and/or a card file`}
+        </pre>
+        <p>Any other CI, or your terminal, with nothing to install up front:</p>
+        <pre className="how-code">
+          {`$ uvx a2a-testbed lint-card agent-card.json
+$ uvx a2a-testbed conformance https://my-agent.example.com \\
+    -o results.sarif -o results.xml
+
+# exit codes: 0 conformant, 1 a contract failed,
+#             3 the agent did not answer some checks, 2 usage or unreachable`}
+        </pre>
+        <p>
+          Scenarios can also check extension semantics: a step&apos;s <code>expect.extensions</code>{' '}
+          calls a tool on the extension&apos;s own MCP server and fails unless it returns the
+          expected verdict.
+        </p>
+        <p>
+          <a
+            className="btn small"
+            href="https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ci.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read the CI guide ↗
+          </a>{' '}
+          <a
+            className="btn small"
+            href="https://github.com/ravikiran438/a2a-testbed/blob/main/docs/scenarios.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Extension checks ↗
+          </a>
+        </p>
+      </section>
+
+      <section className="generate-manifest">
+        <div className="section-head-row">
           <h2>Generate a manifest for your own extension</h2>
           <span className="experimental-badge">experimental</span>
         </div>
@@ -636,9 +716,21 @@ $ a2a-testbed run --acs ./my-agent.acs.yaml my_scenario.yaml`}
       <section className="status">
         <h2>Status</h2>
         <p>
-          Alpha. The CLI surface, scenario format, and manifest envelope may change while the
-          convention is being explored. Everything in this UI runs entirely in the browser; no data
-          leaves your machine except for HTTPS fetches of published manifests.
+          Alpha, published on{' '}
+          <a href="https://pypi.org/project/a2a-testbed/" target="_blank" rel="noreferrer">
+            PyPI
+          </a>
+          . The CLI surface, scenario format, and manifest envelope may change while the convention
+          is being explored; the{' '}
+          <a
+            href="https://github.com/ravikiran438/a2a-testbed/blob/main/CHANGELOG.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            CHANGELOG
+          </a>{' '}
+          lists every change. Everything in this UI runs entirely in the browser; no data leaves
+          your machine except for HTTPS fetches of published manifests.
         </p>
       </section>
     </div>

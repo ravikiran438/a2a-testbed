@@ -8,12 +8,15 @@
 > with spec-cited contracts; and validates + enforces ACS manifests (allow /
 > warn / deny / escalate verdicts with fail-closed enforcement) in both a
 > Python CLI and an in-browser playground. Live at https://a2a-testbed.com,
-> open source under Apache-2.0.
+> open source under Apache-2.0, published on PyPI as `a2a-testbed`
+> (`pip install a2a-testbed`, or run without installing: `uvx a2a-testbed`).
 
 ## What it does
 
 - **Multi-agent scenarios** — declare A2A agents as JSON AgentCards, drive message flows from YAML, exercise real wire traffic end-to-end.
-- **A2A 1.0 conformance** — 58 transport contracts + network contracts, each citing the A2A spec section, runnable against any deployed agent.
+- **A2A 1.0 conformance** — 62 transport contracts + network contracts, each citing the A2A spec section, runnable against any deployed agent; agents that still speak A2A 0.3 are probed in 0.3.
+- **CI gate** — a GitHub Action (`uses: ravikiran438/a2a-testbed@v0`) and CLI commands (`conformance`, `lint-card`) with SARIF, JUnit, JSON and Markdown reports, a baseline file for accepted failures, and exit codes CI can act on.
+- **Extension checks** — scenario steps can check extension semantics on the extension's own MCP server (`expect.extensions`), failing closed.
 - **AgentCard + extension validation** — validate `capabilities.extensions[]` payloads against published JSON-Schema manifests.
 - **ACS runtime governance** — validate ACS manifests, map their eight intervention points onto the A2A wire seam, and enforce verdicts (block a denied handoff before dispatch). Builtin + OPA/Rego policy engines, evidence providers (DLP), fail-closed semantics.
 - **Polyglot runtimes** — Python, Go, Node.js, Java subprocess agents in one scenario; fault injection, virtual time control, an observer pattern.
@@ -22,6 +25,10 @@
 ## a2a-testbed docs
 
 - [README](https://github.com/ravikiran438/a2a-testbed/blob/main/README.md): overview, install, quick-start commands.
+- [PyPI package](https://pypi.org/project/a2a-testbed/): `pip install a2a-testbed`.
+- [CI guide (docs/ci.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ci.md): GitHub Action, CLI in any CI, report formats, exit codes, baseline file, push receivers.
+- [Scenario expectations (docs/scenarios.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/scenarios.md): `expect` blocks, extension checks on MCP servers, MCP delegate configuration and version pinning.
+- [CHANGELOG](https://github.com/ravikiran438/a2a-testbed/blob/main/CHANGELOG.md): release notes.
 - [ACS guide (docs/ACS.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ACS.md): how ACS maps onto the A2A wire seam, manifest format, validation (CLI + browser), enforcement, evidence, Rego.
 - [Architecture (ARCHITECTURE.md)](https://github.com/ravikiran438/a2a-testbed/blob/main/ARCHITECTURE.md): three-layer design, runtimes, conformance subsystem, two-surfaces parity.
 - [Source repository](https://github.com/ravikiran438/a2a-testbed): full source, examples, tests.
@@ -41,4 +48,4 @@
 ## Optional
 
 - [A2A specification (GitHub)](https://github.com/a2aproject/A2A): the upstream A2A spec the conformance contracts are pinned to.
-- [a2aproject/a2a-tck](https://github.com/a2aproject/a2a-tck): the official single-agent A2A compliance kit (a2a-testbed complements it with multi-agent + extension + governance testing).
+- [a2aproject/a2a-tck](https://github.com/a2aproject/a2a-tck): the official single-agent A2A compatibility kit for SDK implementations (a2a-testbed complements it with deployed-agent, multi-agent, extension and governance testing).
