@@ -46,61 +46,63 @@ class SpecMeta:
         return self.commit[:7]
 
 
-def _find_pyproject() -> Path:
-    """Walk up from this module to find the repo's pyproject.toml.
+_BUNDLED_PIN = Path(__file__).resolve().parent / "spec_pin.toml"
 
-    Searching upward (rather than hard-coding `Path(__file__).parents[2]`)
-    keeps the helper working when the package is installed editable
-    from a checkout AND when it's running from a wheel inside
-    site-packages — in the wheel case we fall back to bundled
-    metadata via the ImportError path in ``load_spec_meta``.
+
+def _find_pyproject() -> Path:
+    """Walk up from this module to this project's own pyproject.toml.
+
+    Only a pyproject whose ``[project].name`` is ``a2a-testbed`` counts:
+    an installed wheel lives under some other project's virtualenv, and
+    that project's pyproject.toml must not be mistaken for ours. Raises
+    ``FileNotFoundError`` when there is none (the wheel case).
     """
     here = Path(__file__).resolve()
     for parent in [here.parent, *here.parents]:
         candidate = parent / "pyproject.toml"
-        if candidate.exists():
+        if not candidate.exists():
+            continue
+        try:
+            with candidate.open("rb") as f:
+                name = tomllib.load(f).get("project", {}).get("name")
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if name == "a2a-testbed":
             return candidate
-    raise FileNotFoundError("pyproject.toml not found above a2a_testbed package")
+    raise FileNotFoundError("a2a-testbed pyproject.toml not found above the package")
+
+
+def _spec_section() -> dict:
+    """``[tool.a2a_testbed.spec]`` from the checkout's pyproject.toml, or
+    the copy bundled in the package (``spec_pin.toml``) when installed."""
+    try:
+        path = _find_pyproject()
+    except FileNotFoundError:
+        try:
+            with _BUNDLED_PIN.open("rb") as f:
+                return tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError):
+            return {}
+    with path.open("rb") as f:
+        data = tomllib.load(f)
+    return data.get("tool", {}).get("a2a_testbed", {}).get("spec", {})
 
 
 @lru_cache(maxsize=1)
 def load_spec_meta() -> SpecMeta:
     """Return the spec pin declared in pyproject.toml.
 
-    Falls back to a sentinel SpecMeta with empty fields if the
-    pyproject.toml can't be located (e.g. wheel install without
-    source). The CLI surfaces a "spec metadata unavailable" hint
-    instead of crashing.
+    A source checkout reads pyproject.toml; an installed wheel reads the
+    bundled ``spec_pin.toml``. With neither, fields fall back to a
+    sentinel (version ``unknown``) and the CLI surfaces a "spec metadata
+    unavailable" hint instead of crashing.
     """
-    try:
-        path = _find_pyproject()
-    except FileNotFoundError:
-        return SpecMeta(
-            name="A2A",
-            version="unknown",
-            commit="",
-            last_reviewed="",
-            source_repo="https://github.com/a2aproject/A2A",
-            specification_path="docs/specification.md",
-        )
-
-    with path.open("rb") as f:
-        data = tomllib.load(f)
-
-    section = (
-        data.get("tool", {})
-        .get("a2a_testbed", {})
-        .get("spec", {})
-    )
+    section = _spec_section()
     return SpecMeta(
         name=section.get("name", "A2A"),
         version=section.get("version", "unknown"),
         commit=section.get("commit", ""),
         last_reviewed=section.get("last_reviewed", ""),
-        source_repo=section.get(
-            "source_repo", "https://github.com/a2aproject/A2A"
-        ),
-        specification_path=section.get(
-            "specification_path", "docs/specification.md"
-        ),
+        source_repo=section.get("source_repo", "https://github.com/a2aproject/A2A"),
+        specification_path=section.get("specification_path", "docs/specification.md"),
     )

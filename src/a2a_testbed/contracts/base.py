@@ -45,11 +45,19 @@ under one of the categories above.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
+
+import httpx
+
+# Upper bound on one contract's verify call. Contracts carry their own
+# per-request timeouts (5-10s); this catches the ones that chain several
+# requests or wait on an SSE stream that never closes.
+DEFAULT_CONTRACT_TIMEOUT_S = 45.0
 
 
 # A2A-preferred citation: report rows benefit from showing the A2A
@@ -107,6 +115,57 @@ class ContractCategory(str, Enum):
     POLICY = "policy"  # ACS runtime-governance invariants
 
 
+class ContractStatus(str, Enum):
+    """How one contract run ended.
+
+    ``passed`` stays the single pass/fail bit callers already use; the
+    status says *why*, which is what a CI gate needs:
+
+    - ``pass``  — the agent satisfied the rule.
+    - ``warn``  — satisfied, with a non-fatal deviation in ``detail``.
+    - ``skip``  — the rule does not apply (capability not advertised,
+      0.3-only agent, …). Counts as passed.
+    - ``fail``  — the agent answered, and the answer violates the rule.
+    - ``error`` — the agent could not be reached or did not answer in
+      time. Not a conformance verdict; counts as not passed.
+    """
+
+    PASS = "pass"
+    WARN = "warn"
+    SKIP = "skip"
+    FAIL = "fail"
+    ERROR = "error"
+
+
+# Exceptions that mean "no answer", not "wrong answer".
+_UNREACHABLE = (httpx.TimeoutException, httpx.TransportError, asyncio.TimeoutError)
+
+
+class Info(str):
+    """A passing detail that is information, not a deviation.
+
+    A verify function returns a plain string to mean "passed, with a
+    deviation worth reviewing" (``warn``, which ``--strict`` promotes to a
+    failure). Return ``Info("...")`` instead to report a plain fact about
+    a passing agent — which version it spoke, which response shape it
+    chose — without it counting against the agent.
+    """
+
+
+# "skipped — agent does not implement <method> (-32601)": the rule could
+# not run because a method the agent advertises (or A2A 1.0 requires) is
+# missing. That is a gap in the agent, so it stays a deviation (``warn``,
+# a failure under ``--strict``) rather than a "does not apply" skip.
+_MISSING_METHOD = re.compile(r"does not implement .*\(-32601\)")
+
+
+def is_skip_detail(detail: str) -> bool:
+    """Contracts report "does not apply" as a passing detail string that
+    starts with ``skipped``; recognise that convention."""
+    text = detail.lstrip()
+    return text.lower().startswith("skipped") and not _MISSING_METHOD.search(text)
+
+
 @dataclass
 class ContractResult:
     contract_id: str
@@ -118,6 +177,23 @@ class ContractResult:
     # have no spec section to cite).
     spec_section: Optional[str] = None
     category: Optional[ContractCategory] = None
+    # Why the run ended this way; derived from ``passed``/``detail``
+    # when not given explicitly (see ``ContractStatus``).
+    status: Optional[ContractStatus] = None
+    # How many times the contract ran (2 when an unreachable-agent
+    # error was retried).
+    attempts: int = 1
+
+    def __post_init__(self) -> None:
+        if self.status is None:
+            if not self.passed:
+                self.status = ContractStatus.FAIL
+            elif not self.detail:
+                self.status = ContractStatus.PASS
+            elif is_skip_detail(self.detail):
+                self.status = ContractStatus.SKIP
+            else:
+                self.status = ContractStatus.WARN
 
 
 @dataclass
@@ -138,22 +214,28 @@ class Contract:
     category: ContractCategory
     verify_fn: Callable[..., Awaitable[None]] = field(repr=False)
 
-    async def verify(self, *args: Any, **kwargs: Any) -> ContractResult:
+    async def verify(
+        self,
+        *args: Any,
+        timeout: Optional[float] = DEFAULT_CONTRACT_TIMEOUT_S,
+        **kwargs: Any,
+    ) -> ContractResult:
         spec_section = extract_spec_section(self.verify_fn)
         try:
-            outcome = await self.verify_fn(*args, **kwargs)
+            outcome = await asyncio.wait_for(self.verify_fn(*args, **kwargs), timeout=timeout)
             # A contract that passes with a non-fatal deviation can
             # return a string detail instead of raising. Lets us record
             # "agent honored the capability but returned -32601 instead
             # of the spec-mandated -32004" without flipping the result
             # to failed (the capability *was* honored).
-            detail = outcome if isinstance(outcome, str) else ""
+            detail = str(outcome) if isinstance(outcome, str) else ""
             return ContractResult(
                 self.id,
                 passed=True,
                 detail=detail,
                 spec_section=spec_section,
                 category=self.category,
+                status=ContractStatus.PASS if isinstance(outcome, Info) else None,
             )
         except AssertionError as exc:
             return ContractResult(
@@ -162,6 +244,24 @@ class Contract:
                 detail=str(exc),
                 spec_section=spec_section,
                 category=self.category,
+            )
+        except _UNREACHABLE as exc:
+            import traceback
+
+            if isinstance(exc, asyncio.TimeoutError) and not isinstance(
+                exc, httpx.TimeoutException
+            ):
+                reason = f"agent did not finish responding within {timeout:g}s"
+            else:
+                reason = f"agent unreachable or too slow ({type(exc).__name__}: {exc})"
+            return ContractResult(
+                self.id,
+                passed=False,
+                detail=reason,
+                traceback=traceback.format_exc(),
+                spec_section=spec_section,
+                category=self.category,
+                status=ContractStatus.ERROR,
             )
         except Exception as exc:
             import traceback

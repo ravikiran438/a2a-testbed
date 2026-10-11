@@ -1,0 +1,93 @@
+name: action-selftest
+
+# Exercises the composite action in this repo (action.yml) the way a
+# consumer would: a conformant agent must pass, a drifted one must fail,
+# and the baseline must turn the known failure green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - action.yml
+      - scripts/ci/**
+      - src/a2a_testbed/conformance/**
+      - src/a2a_testbed/contracts/**
+      - src/a2a_testbed/cli/**
+      - .github/workflows/action-selftest.yml
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Start test agents
+        run: |
+          uv sync --extra dev --locked
+          nohup uv run --extra dev python scripts/ci/serve_oracle.py 1.0 8801 > good.log 2>&1 &
+          nohup uv run --extra dev python scripts/ci/serve_oracle.py drift 8802 > drift.log 2>&1 &
+          for port in 8801 8802; do
+            for i in $(seq 1 60); do
+              curl -fsS "http://127.0.0.1:$port/.well-known/agent-card.json" > /dev/null && break
+              sleep 1
+            done
+          done
+          curl -fsS http://127.0.0.1:8801/.well-known/agent-card.json > agent-card.json
+
+      - name: Conformant agent passes (sweep + card lint)
+        id: good
+        uses: ./
+        with:
+          url: http://127.0.0.1:8801
+          card: agent-card.json
+          upload-sarif: "false"
+
+      - name: Drifted agent fails
+        id: drift
+        continue-on-error: true
+        uses: ./
+        with:
+          url: http://127.0.0.1:8802
+          baseline: none
+          upload-sarif: "false"
+
+      - name: The failure is the version drift
+        env:
+          OUTCOME: ${{ steps.drift.outcome }}
+          REPORTS: ${{ steps.drift.outputs.report-dir }}
+        run: |
+          test "$OUTCOME" = failure
+          python3 - "$REPORTS/results.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          assert report["exit_code"] == 1, report["exit_code"]
+          failed = [r["id"] for r in report["results"] if r["outcome"] == "fail"]
+          assert "transport.advertised_version_served" in failed, failed
+          PY
+
+      - name: Write a baseline accepting it
+        run: |
+          cat > baseline.yaml <<'YAML'
+          version: 1
+          accepted:
+            - contract: transport.advertised_version_served
+              reason: Self-test - the drift agent fails this by design.
+          YAML
+
+      - name: Baseline turns the known failure green
+        uses: ./
+        with:
+          url: http://127.0.0.1:8802
+          baseline: baseline.yaml
+          upload-sarif: "false"
+
+      - name: Agent logs
+        if: failure()
+        run: tail -n 50 good.log drift.log

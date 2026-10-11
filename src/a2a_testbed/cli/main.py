@@ -881,6 +881,166 @@ def contracts_cmd(
     raise typer.Exit(code=code)
 
 
+# --------------------------------------------------------------------------
+# Conformance sweep / card lint — shared CI plumbing
+# --------------------------------------------------------------------------
+
+_FORMAT_HELP = (
+    "What to print on stdout: 'table' (default, human-readable), or one of "
+    "'json', 'junit', 'sarif', 'markdown' for machines."
+)
+_REPORT_HELP = (
+    "Also write a report file; the format comes from the extension "
+    "(.json, .xml = JUnit, .sarif, .md). Repeatable."
+)
+_BASELINE_HELP = (
+    "Baseline of accepted failures. Default: .a2a-conformance.yaml in the "
+    "current directory, when present. Pass 'none' to ignore it."
+)
+
+
+def _load_baseline_option(baseline: str | None):
+    from a2a_testbed.conformance import (
+        DEFAULT_BASELINE_PATH,
+        Baseline,
+        BaselineError,
+        load_baseline,
+    )
+
+    if baseline is not None and baseline.strip().lower() == "none":
+        return Baseline()
+    path = Path(baseline) if baseline else Path(DEFAULT_BASELINE_PATH)
+    if baseline is None and not path.exists():
+        return Baseline()
+    try:
+        return load_baseline(path)
+    except BaselineError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _print_table(report) -> None:
+    from a2a_testbed.spec_meta import load_spec_meta
+
+    meta = load_spec_meta()
+    spec_label = (
+        f"{meta.name} {meta.version}{f' (commit {meta.short_commit})' if meta.short_commit else ''}"
+    )
+    noun = "Card lint" if report.kind == "lint" else "Conformance"
+    table = Table(title=f"{noun}: {report.target} vs. {spec_label}", show_lines=False)
+    table.add_column("Spec §", style="dim", no_wrap=True)
+    table.add_column("Contract", style="cyan")
+    table.add_column("Result", justify="center")
+    table.add_column("Detail", style="dim")
+    style = {
+        "pass": "[green]✓[/green]",
+        "warn": "[yellow]~[/yellow]",
+        "skip": "[dim]–[/dim]",
+        "fail": "[red]✗[/red]",
+        "error": "[magenta]! error[/magenta]",
+        "accepted": "[blue]○ accepted[/blue]",
+    }
+    for row in report.rows:
+        detail = row.result.detail or "—"
+        if row.baseline is not None:
+            detail = f"baseline: {row.baseline.reason} — {detail}"
+        if row.result.attempts > 1:
+            detail = f"{detail} (after {row.result.attempts} attempts)"
+        table.add_row(row.result.spec_section or "—", row.id, style[row.outcome], detail)
+    console.print(table)
+    console.print()
+
+    s = report.summary()
+    parts = [f"{s['pass']} passed"]
+    for key, label in (
+        ("warn", "deviation"),
+        ("skip", "skipped"),
+        ("accepted", "accepted by baseline"),
+        ("fail", "failed"),
+        ("error", "error"),
+    ):
+        if s[key]:
+            plural = "s" if key in ("warn", "error") and s[key] != 1 else ""
+            parts.append(f"{s[key]} {label}{plural}")
+    line = f"{', '.join(parts)} — {s['total']} contracts"
+    code = report.exit_code
+    if code == 0:
+        console.print(f"[green]✓ {line}[/green]")
+    elif code == 3:
+        console.print(
+            f"[magenta]! {line}. No contract failed, but the agent did not answer "
+            "some checks (exit 3).[/magenta]"
+        )
+    else:
+        console.print(f"[red]✗ {line}[/red]")
+        if report.strict and s["warn"]:
+            console.print("[red]  --strict: deviations count as failures[/red]")
+    for entry in report.review.stale:
+        console.print(f"[yellow]  baseline: {entry.contract} now passes; delete its entry[/yellow]")
+    for entry in report.review.expired:
+        console.print(
+            f"[yellow]  baseline: {entry.contract} expired {entry.expires}; enforced again[/yellow]"
+        )
+    for entry in report.review.unknown:
+        console.print(f"[yellow]  baseline: {entry.contract} was not run[/yellow]")
+
+
+def _emit(
+    report,
+    *,
+    fmt: str,
+    reports: list[Path] | None,
+    sarif_location: str,
+    step_summary: bool,
+    sarif_category: str | None = None,
+) -> None:
+    from a2a_testbed.conformance import render
+    from a2a_testbed.conformance.report import EXTENSIONS
+
+    if fmt == "table":
+        _print_table(report)
+    else:
+        typer.echo(
+            render(report, fmt, sarif_location=sarif_location, sarif_category=sarif_category),
+            nl=False,
+        )
+    for path in reports or []:
+        kind = EXTENSIONS.get(path.suffix.lower())
+        if kind is None:
+            console.print(
+                f"[red]✗ --report {path}: unknown extension; use one of "
+                f"{', '.join(sorted(EXTENSIONS))}[/red]"
+            )
+            raise typer.Exit(code=2)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            render(report, kind, sarif_location=sarif_location, sarif_category=sarif_category),
+            encoding="utf-8",
+        )
+        if fmt == "table":
+            console.print(f"[dim]wrote {kind} report → {path}[/dim]")
+    _append_step_summary(step_summary, render(report, "markdown", sarif_location=sarif_location))
+
+
+def _append_step_summary(enabled: bool, markdown: str) -> None:
+    import os
+
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if enabled and path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(markdown + "\n")
+
+
+def _check_format(fmt: str) -> str:
+    fmt = fmt.lower()
+    if fmt not in ("table", "json", "junit", "sarif", "markdown"):
+        console.print(
+            f"[red]✗ --format must be table, json, junit, sarif or markdown; got {fmt!r}[/red]"
+        )
+        raise typer.Exit(code=2)
+    return fmt
+
+
 @app.command(name="conformance")
 def conformance_cmd(
     agent_url: str = typer.Argument(
@@ -909,14 +1069,64 @@ def conformance_cmd(
             "that serves both."
         ),
     ),
+    fmt: str = typer.Option("table", "--format", "-f", help=_FORMAT_HELP),
+    report_paths: list[Path] | None = typer.Option(None, "--report", "-o", help=_REPORT_HELP),
+    baseline: str | None = typer.Option(None, "--baseline", help=_BASELINE_HELP),
+    write_baseline: Path | None = typer.Option(
+        None,
+        "--write-baseline",
+        help=(
+            "Write a starter baseline listing every current failure (with empty "
+            "reasons to fill in) to this path, then exit with the sweep's code."
+        ),
+    ),
+    timeout: float = typer.Option(
+        45.0, "--timeout", help="Seconds one contract may take before it counts as an error."
+    ),
+    retries: int = typer.Option(
+        1,
+        "--retries",
+        help="Re-run a contract this many times when the agent did not answer (not on failures).",
+    ),
+    push_receiver: str = typer.Option(
+        "auto",
+        "--push-receiver",
+        help=(
+            "Webhook receiver for the push-delivery contract: 'auto' (a local one for "
+            "loopback agents, the hosted one otherwise), 'local', 'hosted', 'off', or "
+            "a URL serving POST /webhook/<token> and GET /received/<token>."
+        ),
+    ),
+    only: list[str] | None = typer.Option(
+        None,
+        "--only",
+        help="Run only this contract id (repeatable), e.g. transport.advertised_version_served.",
+    ),
+    sarif_location: str = typer.Option(
+        "agent-card.json",
+        "--sarif-location",
+        help="Repository file SARIF findings are anchored to (code scanning needs one).",
+    ),
+    sarif_category: str | None = typer.Option(
+        None,
+        "--sarif-category",
+        help=(
+            "Code-scanning category (SARIF automationDetails.id). Give each agent its "
+            "own when one workflow checks several, or their alerts replace each other."
+        ),
+    ),
+    step_summary: bool = typer.Option(
+        True,
+        "--step-summary/--no-step-summary",
+        help="Append a Markdown summary to $GITHUB_STEP_SUMMARY when it is set.",
+    ),
 ) -> None:
     """Run the full A2A transport-contract sweep against a deployed agent.
 
     Standalone counterpart to ``run``: takes a URL, fetches the
     AgentCard, and exercises every spec-derived transport contract
     against the live deployment. Prints a per-row table with the spec
-    section each contract enforces and exits non-zero if any contract
-    fails.
+    section each contract enforces.
 
     The agent is probed in the protocol version its card advertises:
     A2A 1.0 (``SendMessage``, ``A2A-Version: 1.0``) by default, A2A 0.3
@@ -924,104 +1134,131 @@ def conformance_cmd(
     the 1.0 shape before checks; rules that only exist in 1.0 are
     skipped for 0.3 agents.
 
-    Use this for your own deployed agents — Cloudflare Workers,
-    AWS Lambda, GKE, anywhere — to confirm conformance before
-    onboarding a third party. The ``run --probe-external`` flag
-    does the same checks inside a multi-agent scenario when you'd
-    rather drive realistic flow at the same time.
+    Exit codes: 0 conformant (or every failure accepted by the
+    baseline); 1 a contract failed; 3 no failures but the agent did not
+    answer some checks even after a retry; 2 usage error or the agent
+    could not be reached at all.
     """
-    from a2a_testbed.contracts.runner import run_transport_contracts
-    from a2a_testbed.spec_meta import load_spec_meta
-    from a2a_testbed.transport import A2ATransport
+    from a2a_testbed.conformance import AgentUnreachable, render_baseline, run_sweep
 
+    fmt = _check_format(fmt)
+    loaded = _load_baseline_option(baseline)
+    quiet = fmt != "table"
+
+    async def _run():
+        return await run_sweep(
+            agent_url,
+            protocol_version=protocol_version,
+            baseline=loaded,
+            strict=fail_on_deviation,
+            timeout=timeout if timeout > 0 else None,
+            retries=max(0, retries),
+            push_receiver=push_receiver,
+            only=only or None,
+        )
+
+    if not quiet:
+        console.print(f"Sweeping {agent_url} …")
     try:
-        transport = A2ATransport(protocol_version=protocol_version)
+        report = asyncio.run(_run())
     except ValueError as exc:
         console.print(f"[red]✗ {exc}[/red]")
         raise typer.Exit(code=2) from exc
+    except AgentUnreachable as exc:
+        console.print(f"[red]✗ agent unreachable: {exc}[/red]")
+        _append_step_summary(
+            step_summary,
+            f"### A2A conformance: ⚠️ Agent unreachable\n\n`{agent_url}`: {exc}\n",
+        )
+        raise typer.Exit(code=2) from exc
 
-    async def _run() -> int:
-        from a2a_testbed.contracts.transport._task_helpers import AgentProbe
-
-        probe = await AgentProbe.create(transport, agent_url)
+    if not quiet:
+        legacy = report.protocol_version == "0.3"
         source = "pinned" if protocol_version else "from the AgentCard"
         console.print(
-            f"Probing with A2A {probe.dialect.value} ({source}): "
-            f"{probe.method('send')}"
-            + (", no A2A-Version header" if probe.is_legacy else ", A2A-Version: 1.0")
+            f"Probed with A2A {report.protocol_version} ({source})"
+            + (", no A2A-Version header" if legacy else ", A2A-Version: 1.0")
+            + f"; push receiver: {report.push_receiver}"
         )
-        try:
-            results = await run_transport_contracts(transport, agent_url)
-        except Exception as exc:  # pragma: no cover - defensive
-            console.print(f"[red]✗ contract sweep failed before completing: {exc}[/red]")
-            return 2
-
-        meta = load_spec_meta()
-        spec_label = (
-            f"{meta.name} {meta.version}"
-            f"{f' (commit {meta.short_commit})' if meta.short_commit else ''}"
+    _emit(
+        report,
+        fmt=fmt,
+        reports=report_paths,
+        sarif_location=sarif_location,
+        step_summary=step_summary,
+        sarif_category=sarif_category,
+    )
+    if write_baseline is not None:
+        write_baseline.write_text(
+            render_baseline(report.results, agent_url=agent_url, strict=fail_on_deviation),
+            encoding="utf-8",
         )
-        table = Table(
-            title=f"Conformance: {agent_url} vs. {spec_label}",
-            show_lines=False,
-        )
-        table.add_column("Spec §", style="dim", no_wrap=True)
-        table.add_column("Contract", style="cyan")
-        table.add_column("Pass", justify="center")
-        table.add_column("Detail", style="dim")
-
-        passed = 0
-        failed = 0
-        deviations = 0
-        for r in results:
-            check = "[green]✓[/green]" if r.passed else "[red]✗[/red]"
-            # Contracts that returned a soft-pass detail string are
-            # still passed=True but their detail starts with
-            # "capability honored —" or similar. Surface them as
-            # warnings so the operator can decide whether to act.
-            if r.passed and r.detail:
-                check = "[yellow]~[/yellow]"
-                deviations += 1
-            if r.passed:
-                passed += 1
-            else:
-                failed += 1
-            table.add_row(
-                r.spec_section or "—",
-                r.contract_id,
-                check,
-                r.detail or "—",
-            )
-        console.print(table)
-        console.print()
-
-        # Decide exit code. Strict mode promotes deviations to failures
-        # so CI can gate on "perfect conformance"; default lets them
-        # through (the agent honored the capability).
-        effective_failures = failed + (deviations if fail_on_deviation else 0)
-        if effective_failures == 0:
+        if not quiet:
             console.print(
-                f"[green]✓ {passed}/{len(results)} contracts passed[/green]"
-                + (
-                    f"  [yellow]({deviations} soft-pass deviation"
-                    f"{'s' if deviations != 1 else ''})[/yellow]"
-                    if deviations
-                    else ""
-                )
+                f"[dim]wrote starter baseline → {write_baseline} (fill in every reason)[/dim]"
             )
-            return 0
+    raise typer.Exit(code=report.exit_code)
 
-        if failed:
-            console.print(f"[red]✗ {failed} of {len(results)} contracts failed[/red]")
-        if fail_on_deviation and deviations:
-            console.print(
-                f"[red]✗ --strict: {deviations} deviation"
-                f"{'s' if deviations != 1 else ''} treated as failures[/red]"
+
+@app.command(name="lint-card")
+def lint_card_cmd(
+    card: Path = typer.Argument(
+        ..., help="Path to an AgentCard JSON file (for example agent-card.json)."
+    ),
+    fail_on_deviation: bool = typer.Option(
+        False, "--strict", help="Treat soft-pass deviations as failures."
+    ),
+    protocol_version: str | None = typer.Option(
+        None,
+        "--protocol-version",
+        help="Check the card as A2A '1.0' or '0.3'. Default: what the card advertises.",
+    ),
+    fmt: str = typer.Option("table", "--format", "-f", help=_FORMAT_HELP),
+    report_paths: list[Path] | None = typer.Option(None, "--report", "-o", help=_REPORT_HELP),
+    baseline: str | None = typer.Option(None, "--baseline", help=_BASELINE_HELP),
+    sarif_category: str | None = typer.Option(
+        None,
+        "--sarif-category",
+        help=(
+            "Code-scanning category (SARIF automationDetails.id). Give each agent its "
+            "own when one workflow checks several, or their alerts replace each other."
+        ),
+    ),
+    step_summary: bool = typer.Option(
+        True,
+        "--step-summary/--no-step-summary",
+        help="Append a Markdown summary to $GITHUB_STEP_SUMMARY when it is set.",
+    ),
+) -> None:
+    """Check an AgentCard file without a running agent.
+
+    Runs the card-only contracts of the live sweep (same ids, same spec
+    sections, same messages) against the file, served from a throwaway
+    loopback server. Fast enough for a pre-commit hook or a PR lint job.
+    Exit codes as for ``conformance``.
+    """
+    from a2a_testbed.conformance import run_card_lint
+
+    fmt = _check_format(fmt)
+    loaded = _load_baseline_option(baseline)
+    try:
+        report = asyncio.run(
+            run_card_lint(
+                card, protocol_version=protocol_version, baseline=loaded, strict=fail_on_deviation
             )
-        return 1
-
-    code = asyncio.run(_run())
-    raise typer.Exit(code=code)
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    _emit(
+        report,
+        fmt=fmt,
+        reports=report_paths,
+        sarif_location=str(card),
+        step_summary=step_summary,
+        sarif_category=sarif_category,
+    )
+    raise typer.Exit(code=report.exit_code)
 
 
 @app.command(name="coverage")

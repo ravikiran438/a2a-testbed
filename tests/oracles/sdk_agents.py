@@ -31,7 +31,6 @@ import contextlib
 import re
 import socket
 from collections.abc import AsyncIterator
-from typing import Any
 
 import httpx
 import uvicorn
@@ -59,6 +58,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from a2a_testbed.contracts.push_receiver import (  # re-exported for tests
+    build_push_receiver as build_push_receiver,
+)
 from a2a_testbed.transport.dialect import card_to_v03_json
 
 CARD_PATH = "/.well-known/agent-card.json"
@@ -162,27 +164,6 @@ def build_sdk_agent(base_url: str, protocol_version: str) -> Starlette:
     else:
         routes.extend(create_agent_card_routes(card, card_url=CARD_PATH))
     return Starlette(routes=routes)
-
-
-def build_push_receiver() -> Starlette:
-    """Capture webhooks per token, like push.a2a-testbed.com."""
-    received: dict[str, list[dict[str, Any]]] = {}
-
-    async def webhook(request: Request) -> JSONResponse:
-        token = request.path_params["token"]
-        body = (await request.body()).decode("utf-8", "replace")
-        received.setdefault(token, []).append({"body": body, "headers": dict(request.headers)})
-        return JSONResponse({"ok": True})
-
-    async def read(request: Request) -> JSONResponse:
-        return JSONResponse({"hooks": received.get(request.path_params["token"], [])})
-
-    return Starlette(
-        routes=[
-            Route("/webhook/{token}", webhook, methods=["POST"]),
-            Route("/received/{token}", read, methods=["GET"]),
-        ]
-    )
 
 
 def free_port() -> int:

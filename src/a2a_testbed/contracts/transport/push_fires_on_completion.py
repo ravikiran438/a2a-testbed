@@ -12,8 +12,11 @@ Clause:  When a Task completes (or transitions to any terminal
 
          Mechanism: configure the agent to push to our hosted
          receiver, drive a fresh task to completion, poll the
-         receiver for the captured webhook. Override the receiver
-         via ``A2A_TESTBED_PUSH_RECEIVER`` env var.
+         receiver for the captured webhook. The receiver is chosen
+         by ``--push-receiver`` (a local one for agents on this
+         machine, the hosted one otherwise) or the
+         ``A2A_TESTBED_PUSH_RECEIVER`` env var; when it is switched
+         off or unreachable the contract skips rather than fails.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from a2a_testbed.contracts.transport._task_helpers import (
     error_code,
     fresh_token,
     push_receiver_base,
+    push_receiver_skip_detail,
     push_skip_detail,
     read_received_hooks,
     webhook_task_id,
@@ -40,7 +44,7 @@ from a2a_testbed.transport.dialect import push_set_params
 def make_push_fires_on_completion_contract(transport: Transport, agent_url: str) -> Contract:
     async def verify() -> str | None:
         probe = await AgentProbe.create(transport, agent_url)
-        skip = push_skip_detail(probe.card)
+        skip = push_skip_detail(probe.card) or await push_receiver_skip_detail()
         if skip:
             return skip
         token = fresh_token()

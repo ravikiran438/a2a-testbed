@@ -253,7 +253,7 @@ export const streamingArtifactUpdateShape: Contract = {
       );
     });
     if (seen === 0) {
-      return 'agent streamed no artifactUpdate events for count=2 — skipped';
+      return 'skipped — agent streamed no artifactUpdate events for count=2 (§4.1.7 only applies when emitted)';
     }
   },
 };

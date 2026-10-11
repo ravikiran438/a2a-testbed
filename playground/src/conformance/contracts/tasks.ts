@@ -290,7 +290,7 @@ export const tasksListSortedDesc: Contract = {
     assert(Array.isArray(raw), `${probe.method('list')} result MUST contain a \`tasks\` array`);
     const tasks = raw.map((t) => probe.taskOf(t));
     if (tasks.length < 2) {
-      return `only ${tasks.length} task(s) returned; can't verify sort`;
+      return `skipped — only ${tasks.length} task(s) returned; can't verify sort order with fewer than two`;
     }
     const stamps: string[] = [];
     tasks.forEach((t, i) => {

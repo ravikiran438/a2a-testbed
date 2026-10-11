@@ -61,11 +61,22 @@ a2a-testbed = "a2a_testbed.cli.main:app"
 Homepage = "https://github.com/ravikiran438/a2a-testbed"
 Issues = "https://github.com/ravikiran438/a2a-testbed/issues"
 
+[tool.uv]
+# Rebuild this package when its sources change, not only when
+# pyproject.toml does. The GitHub Action installs the tool from its own
+# checkout (uvx --from <path>); without this a moved tag with an
+# unchanged version would run a stale cached build.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "src/**/*.py" },
+  { file = "src/**/*.toml" },
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-a2a_testbed = ["py.typed"]
+a2a_testbed = ["py.typed", "spec_pin.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -97,6 +108,8 @@ select = ["E4", "E7", "E9", "F"]
 #   - `a2a-testbed run --reports …` (compliance section header)
 #   - `a2a-testbed version` (visible cite)
 #
+# A copy ships in the package as src/a2a_testbed/spec_pin.toml (so an
+# installed wheel reports the same pin); update both together.
 # Updating this block is a deliberate process — see
 # CONTRIBUTING.md "Tracking the upstream A2A spec" for the
 # quarterly-review checklist.

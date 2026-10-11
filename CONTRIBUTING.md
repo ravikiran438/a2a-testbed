@@ -136,7 +136,10 @@ version. The review takes ~1–2 hours.
    implemented vs. roadmap contracts changed.
 
 5. **Bump the pin.** Update `commit` to the latest reviewed SHA
-   and `last_reviewed` to today's date in `pyproject.toml`.
+   and `last_reviewed` to today's date in `pyproject.toml`, and make
+   the same change in `src/a2a_testbed/spec_pin.toml` (the copy an
+   installed wheel reads; `tests/unit/test_spec_meta_bundled.py` fails
+   while the two differ).
    Commit with `chore(spec): bump A2A pin to <short-sha>` — the
    PR description should list every clause that was reviewed.
 

@@ -431,24 +431,36 @@ async def stream_sse_events(
                 body = (await resp.aread()).decode("utf-8", "replace")
                 raise SseFormatError(f"expected text/event-stream, got {ctype!r}", body=body)
             buffer = ""
-            async for chunk in resp.aiter_text():
-                # SSE allows CRLF, LF or CR line endings (WHATWG HTML
-                # §9.2.6); sse-starlette — used by the a2a-sdk — emits
-                # CRLF. Normalize so blank-line framing splits correctly.
-                buffer += chunk
-                # Hold back a trailing CR: its LF may arrive in the next chunk.
-                held = "\r" if buffer.endswith("\r") else ""
-                if held:
-                    buffer = buffer[:-1]
-                buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
-                while "\n\n" in buffer:
-                    raw, buffer = buffer.split("\n\n", 1)
-                    parsed = _parse_sse_block(raw)
-                    if parsed is not None:
-                        events.append(parsed)
-                        if len(events) >= max_events:
-                            return events
-                buffer += held
+            try:
+                async for chunk in resp.aiter_text():
+                    # SSE allows CRLF, LF or CR line endings (WHATWG HTML
+                    # §9.2.6); sse-starlette — used by the a2a-sdk — emits
+                    # CRLF. Normalize so blank-line framing splits correctly.
+                    buffer += chunk
+                    # Hold back a trailing CR: its LF may arrive in the next chunk.
+                    held = "\r" if buffer.endswith("\r") else ""
+                    if held:
+                        buffer = buffer[:-1]
+                    buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
+                    while "\n\n" in buffer:
+                        raw, buffer = buffer.split("\n\n", 1)
+                        parsed = _parse_sse_block(raw)
+                        if parsed is not None:
+                            events.append(parsed)
+                            if len(events) >= max_events:
+                                return events
+                    buffer += held
+            except httpx.ReadTimeout as exc:
+                # The agent answered (status + SSE headers) and then went
+                # silent without closing the stream. That is behavior to
+                # judge, not an unreachable agent: report a failure, not an
+                # error to retry.
+                raise AssertionError(
+                    f"{method} stream went silent for {timeout:g}s after "
+                    f"{len(events)} event(s) without closing (§3.1.2: the server "
+                    "closes the stream once the task reaches a terminal or "
+                    "interrupted state)"
+                ) from exc
             buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
             # Trailing block without final blank line.
             if buffer.strip():
@@ -511,10 +523,36 @@ class SseFormatError(AssertionError):
 def push_receiver_base() -> str:
     import os
 
-    return os.environ.get(
-        "A2A_TESTBED_PUSH_RECEIVER",
-        "https://push.a2a-testbed.com",
-    )
+    from a2a_testbed.contracts.push_receiver import HOSTED_PUSH_RECEIVER, PUSH_RECEIVER_ENV
+
+    return os.environ.get(PUSH_RECEIVER_ENV) or HOSTED_PUSH_RECEIVER
+
+
+async def push_receiver_skip_detail() -> Optional[str]:
+    """A skip-detail string when push delivery cannot be observed: the
+    receiver is switched off or does not answer. A receiver we cannot
+    read is a gap in the test rig, not evidence against the agent."""
+    from a2a_testbed.contracts.push_receiver import PUSH_RECEIVER_OFF
+
+    base = push_receiver_base().rstrip("/")
+    if base.lower() == PUSH_RECEIVER_OFF:
+        return "skipped — push receiver disabled (--push-receiver off)"
+    probe_url = f"{base}/received/{fresh_token()}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(probe_url)
+    except httpx.HTTPError as exc:
+        return (
+            f"skipped — push receiver {base} is unreachable ({type(exc).__name__}); "
+            "use --push-receiver local for an agent on this machine, or a receiver "
+            "URL the agent can reach"
+        )
+    if resp.status_code != 200:
+        return (
+            f"skipped — push receiver {base} answered HTTP {resp.status_code} on "
+            "/received/<token>; use --push-receiver local or another receiver URL"
+        )
+    return None
 
 
 def fresh_token() -> str:

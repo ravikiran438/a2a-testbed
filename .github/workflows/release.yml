@@ -1,0 +1,66 @@
+name: release
+
+# Publishes a2a-testbed to PyPI when a version tag (v*) is pushed, using
+# PyPI trusted publishing (no API token stored in the repo). One-time
+# setup on pypi.org: add a trusted publisher for this repository with
+# workflow "release.yml" and environment "pypi".
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python3 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          test "${TAG#v}" = "$version" || { echo "::error::tag $TAG does not match pyproject version $version"; exit 1; }
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test the wheel outside the checkout
+        run: |
+          wheel="$(ls "$PWD"/dist/*.whl)"
+          card="$PWD/examples/agent-cards/mixed-versions/modern.json"
+          cd "$RUNNER_TEMP"
+          uvx --from "$wheel" a2a-testbed lint-card "$card" --format json --no-step-summary > lint.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open("lint.json"))
+          assert report["verdict"] == "pass", report["summary"]
+          assert report["spec"]["version"] != "unknown", report["spec"]
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

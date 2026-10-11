@@ -49,7 +49,7 @@ capabilities:
   JSON-Schema manifests.
 - Validate **Agent Control Specification (ACS)** manifests and map their
   runtime-control checkpoints onto the A2A wire seam, with fail-closed
-  checks — offline (CLI) and in-browser. See [docs/ACS.md](docs/ACS.md).
+  checks — offline (CLI) and in-browser. See [docs/ACS.md](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ACS.md).
 
 ## Quick start
 
@@ -122,9 +122,36 @@ a2a-testbed run --acs-enforce \
 The bundled three-party scenario produces a colored step table and
 written reports under `examples/scenarios/reports/`.
 
+## Use in CI
+
+Gate an agent on A2A conformance in any pipeline. The GitHub Action
+sweeps a live URL and/or lints an AgentCard file, writes a job summary,
+uploads SARIF to code scanning and fails the check on contract
+violations:
+
+```yaml
+- uses: ravikiran438/a2a-testbed@v0
+  with:
+    url: ${{ steps.deploy.outputs.preview_url }}   # a running agent
+    card: agent-card.json                           # and/or a card file
+```
+
+Elsewhere, call the CLI directly:
+
+```bash
+uvx a2a-testbed lint-card agent-card.json            # no server needed
+uvx a2a-testbed conformance https://agent.example \
+  -o results.sarif -o results.xml -o results.json
+```
+
+Exit codes: `0` conformant, `1` a contract failed, `3` the agent did not
+answer some checks (retried once), `2` usage error or agent unreachable.
+Known failures go in a `.a2a-conformance.yaml` baseline with a reason
+each. Details in [docs/ci.md](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ci.md).
+
 ## Common tasks
 
-The repo ships a [`Justfile`](Justfile) that orchestrates work across
+The repo ships a [`Justfile`](https://github.com/ravikiran438/a2a-testbed/blob/main/Justfile) that orchestrates work across
 all the apps (Python testbed, in-browser playground, hosted demo
 agents). Install [Just](https://just.systems) once
 (`brew install just` on macOS, or see the install page for other
@@ -167,7 +194,7 @@ and enforces each step's `expect` block (`response_status`,
 CLI runs. The bundled `cloudflare_math_demo` scenario drives a live
 LLM-backed A2A agent on Cloudflare Workers (Llama 3.3 via Groq, JSON
 mode) end-to-end. See
-[`playground/README.md`](playground/README.md#live-llm-agent-validation)
+[`playground/README.md`](https://github.com/ravikiran438/a2a-testbed/blob/main/playground/README.md#live-llm-agent-validation)
 for the full execution model and how to add your own live scenario.
 
 Run it locally:
@@ -226,7 +253,7 @@ observer agents.
 and a runtime kind. Default runtime is `python_inproc` (in the
 orchestrator process); cross-SDK scenarios pick `go`, `nodejs`, or
 `external`. (`java` is reserved — adapter exists but no reference
-jar ships yet; see [`agents/java-template/`](agents/java-template/).)
+jar ships yet; see [`agents/java-template/`](https://github.com/ravikiran438/a2a-testbed/blob/main/agents/java-template/).)
 
 **Mode.** A scenario picks one. `sim` (default) runs all agents in a
 single Starlette server with path-prefix routing — fast, dev-friendly.
@@ -349,7 +376,7 @@ Bundled under `examples/scenarios/`:
 ACS manifests under `examples/acs/`: `email-agent.acs.yaml` (builtin),
 `email-agent-rego.acs.yaml` (OPA/Rego), `dlp-evidence.acs.yaml` (evidence
 provider), `three-party-governance.acs.yaml`, and
-`cloudflare-math-governance.acs.yaml`. See [docs/ACS.md](docs/ACS.md).
+`cloudflare-math-governance.acs.yaml`. See [docs/ACS.md](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/ACS.md).
 
 ## Project goals
 
@@ -392,7 +419,7 @@ convention, and a hosted browser playground at
 <https://a2a-testbed.com>.
 
 The reference task-runner at
-[`examples/hosted-agents/cloudflare-task-runner/`](examples/hosted-agents/cloudflare-task-runner/),
+[`examples/hosted-agents/cloudflare-task-runner/`](https://github.com/ravikiran438/a2a-testbed/blob/main/examples/hosted-agents/cloudflare-task-runner/),
 deployed at `https://tasks.a2a-testbed.com`, can also serve as the
 SUT for an a2a-tck run:
 
@@ -409,10 +436,10 @@ JSON-RPC-only agent does not implement.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issues and pull requests
+See [`CONTRIBUTING.md`](https://github.com/ravikiran438/a2a-testbed/blob/main/CONTRIBUTING.md). Issues and pull requests
 welcome.
 
 ## License
 
-Apache 2.0. See [`LICENSE`](LICENSE). Hosted playground:
+Apache 2.0. See [`LICENSE`](https://github.com/ravikiran438/a2a-testbed/blob/main/LICENSE). Hosted playground:
 [a2a-testbed.com](https://a2a-testbed.com).

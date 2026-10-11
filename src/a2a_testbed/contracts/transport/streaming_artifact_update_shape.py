@@ -53,8 +53,8 @@ def make_streaming_artifact_update_shape_contract(transport: Transport, agent_ur
             )
         if seen == 0:
             return (
-                "agent streamed no artifactUpdate events for count=2 — "
-                "skipping shape check (§4.1.7 only applies when emitted)"
+                "skipped — agent streamed no artifactUpdate events for count=2 "
+                "(§4.1.7 only applies when emitted)"
             )
         return None
 

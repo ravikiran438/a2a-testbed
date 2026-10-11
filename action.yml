@@ -1,0 +1,147 @@
+name: A2A conformance
+description: >-
+  Check an A2A agent against the A2A specification: sweep a live endpoint
+  and/or lint an AgentCard file, with SARIF, JUnit, JSON and job-summary
+  output and a baseline of accepted failures.
+author: Ravi Kiran Kadaboina
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  url:
+    description: >-
+      Base URL of a running agent to sweep (not the card path), e.g. a
+      preview deployment or http://127.0.0.1:8000 started earlier in the job.
+    required: false
+    default: ""
+  card:
+    description: Path to an AgentCard JSON file to lint without a running agent.
+    required: false
+    default: ""
+  baseline:
+    description: >-
+      Baseline of accepted failures. Used when the file exists; 'none'
+      ignores it.
+    required: false
+    default: .a2a-conformance.yaml
+  strict:
+    description: Treat soft-pass deviations as failures.
+    required: false
+    default: "false"
+  protocol-version:
+    description: Probe as A2A '1.0' or '0.3' instead of what the card advertises.
+    required: false
+    default: ""
+  push-receiver:
+    description: >-
+      Webhook receiver for the push-delivery contract: auto, local, hosted,
+      off, or a receiver URL. auto picks local for a 127.0.0.1/localhost
+      agent; an agent in a Docker container cannot reach the runner's
+      loopback, so use hosted (or your own receiver URL) for it.
+    required: false
+    default: auto
+  timeout:
+    description: Seconds one contract may take before it counts as an error.
+    required: false
+    default: "45"
+  retries:
+    description: Re-runs for a contract whose agent did not answer.
+    required: false
+    default: "1"
+  fail-on-errors:
+    description: >-
+      Fail the step when the agent did not answer some checks (exit 3) even
+      though no contract failed. Set to false to tolerate a flaky preview.
+    required: false
+    default: "true"
+  sarif-location:
+    description: >-
+      Repository file code-scanning findings are anchored to. Defaults to
+      the card input, else agent-card.json.
+    required: false
+    default: ""
+  sarif-category:
+    description: >-
+      Code-scanning category prefix. Set a distinct value per agent when one
+      workflow checks several (e.g. in a matrix); otherwise their alerts
+      replace each other.
+    required: false
+    default: ""
+  upload-sarif:
+    description: >-
+      Upload SARIF to GitHub code scanning (needs 'security-events: write').
+      A failed upload never fails the step.
+    required: false
+    default: "true"
+  package:
+    description: >-
+      Where to install a2a-testbed from: empty (default) uses this action's
+      own checkout, so the tool always matches the action ref; or a pip
+      requirement such as 'a2a-testbed==0.2.0'.
+    required: false
+    default: ""
+  python-version:
+    description: Python to run the tool with.
+    required: false
+    default: "3.12"
+
+outputs:
+  exit-code:
+    description: "0 conformant, 1 a contract failed, 3 agent did not answer some checks, 2 usage error or unreachable."
+    value: ${{ steps.run.outputs.exit-code }}
+  report-dir:
+    description: Directory holding results.json, results.sarif, results.xml and summary.md.
+    value: ${{ steps.run.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Run a2a-testbed
+      id: run
+      shell: bash
+      env:
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_CARD: ${{ inputs.card }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_PROTOCOL_VERSION: ${{ inputs.protocol-version }}
+        INPUT_PUSH_RECEIVER: ${{ inputs.push-receiver }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_RETRIES: ${{ inputs.retries }}
+        INPUT_FAIL_ON_ERRORS: ${{ inputs.fail-on-errors }}
+        INPUT_SARIF_LOCATION: ${{ inputs.sarif-location }}
+        INPUT_SARIF_CATEGORY: ${{ inputs.sarif-category }}
+        INPUT_PACKAGE: ${{ inputs.package }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "$ACTION_PATH/scripts/ci/run-conformance.sh"
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.run.outputs.sarif != '' }}
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif }}
+
+    - name: Enforce result
+      if: ${{ always() }}
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+        INPUT_FAIL_ON_ERRORS: ${{ inputs.fail-on-errors }}
+      run: |
+        case "${CODE:-2}" in
+          0) echo "A2A conformance: pass" ;;
+          3) if [ "$INPUT_FAIL_ON_ERRORS" = "true" ]; then
+               echo "::error::A2A conformance: the agent did not answer some checks (exit 3)"; exit 3
+             else
+               echo "::warning::A2A conformance: the agent did not answer some checks (tolerated)"
+             fi ;;
+          1) echo "::error::A2A conformance: contract failures (see the job summary)"; exit 1 ;;
+          *) echo "::error::A2A conformance: usage error or agent unreachable (exit ${CODE:-2})"; exit "${CODE:-2}" ;;
+        esac

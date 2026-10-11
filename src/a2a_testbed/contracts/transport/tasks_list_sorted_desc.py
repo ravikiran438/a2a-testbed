@@ -47,7 +47,8 @@ def make_tasks_list_sorted_desc_contract(transport: Transport, agent_url: str) -
         tasks = [probe.task_of(t) for t in tasks]
         if len(tasks) < 2:
             return (
-                f"only {len(tasks)} task(s) returned; can't verify sort order with fewer than two"
+                f"skipped — only {len(tasks)} task(s) returned; can't verify sort "
+                "order with fewer than two"
             )
         timestamps = []
         for i, t in enumerate(tasks):

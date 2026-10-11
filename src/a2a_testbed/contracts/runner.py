@@ -18,9 +18,16 @@ a completed ScenarioResult). A future ``run_all`` orchestrates both.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
+from typing import Optional
 
-from a2a_testbed.contracts.base import Contract, ContractResult
+from a2a_testbed.contracts.base import (
+    DEFAULT_CONTRACT_TIMEOUT_S,
+    Contract,
+    ContractResult,
+    ContractStatus,
+)
 from a2a_testbed.contracts.network.fault_recovery import (
     make_fault_recovery_contract,
 )
@@ -318,19 +325,55 @@ def network_contracts(
     ]
 
 
+# Pause before retrying a contract whose agent did not answer: long
+# enough for a cold start or a dropped connection to clear.
+RETRY_BACKOFF_S = 1.0
+
+
 async def run_contracts(
     contracts: Iterable[Contract],
+    *,
+    timeout: Optional[float] = DEFAULT_CONTRACT_TIMEOUT_S,
+    retries: int = 1,
 ) -> list[ContractResult]:
-    """Run every contract sequentially and collect results."""
+    """Run every contract sequentially and collect results.
+
+    ``timeout`` bounds each contract's verify call. A contract whose
+    agent could not be reached or did not answer in time
+    (``ContractStatus.ERROR``) is re-run up to ``retries`` times;
+    wrong answers (``FAIL``) are never retried.
+    """
     results: list[ContractResult] = []
     for contract in contracts:
-        results.append(await contract.verify())
+        result = await contract.verify(timeout=timeout)
+        attempts = 1
+        while result.status is ContractStatus.ERROR and attempts <= retries:
+            await asyncio.sleep(RETRY_BACKOFF_S)
+            result = await contract.verify(timeout=timeout)
+            attempts += 1
+        result.attempts = attempts
+        results.append(result)
     return results
 
 
-async def run_transport_contracts(transport: Transport, agent_url: str) -> list[ContractResult]:
-    """Run every spec-derived transport contract against one agent."""
-    return await run_contracts(transport_contracts(transport, agent_url))
+async def run_transport_contracts(
+    transport: Transport,
+    agent_url: str,
+    *,
+    timeout: Optional[float] = DEFAULT_CONTRACT_TIMEOUT_S,
+    retries: int = 1,
+    only: Optional[Iterable[str]] = None,
+) -> list[ContractResult]:
+    """Run every spec-derived transport contract against one agent.
+
+    ``only`` restricts the sweep to the given contract ids (in suite
+    order).
+    """
+    contracts = transport_contracts(transport, agent_url)
+    if only is not None:
+        wanted = set(only)
+        contracts = [c for c in contracts if c.id in wanted]
+    return await run_contracts(contracts, timeout=timeout, retries=retries)
 
 
 async def run_network_contracts(
@@ -349,4 +392,5 @@ def summarize(results: Iterable[ContractResult]) -> dict[str, int]:
         "total": len(items),
         "passed": sum(1 for r in items if r.passed),
         "failed": sum(1 for r in items if not r.passed),
+        **{s.value: sum(1 for r in items if r.status is s) for s in ContractStatus},
     }

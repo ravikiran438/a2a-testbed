@@ -15,7 +15,7 @@ Clause:  Per the spec example (line 1376) the first SSE event of
 
 from __future__ import annotations
 
-from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.base import Contract, ContractCategory, Info
 from a2a_testbed.contracts.transport._task_helpers import (
     AgentProbe,
     looks_like_task,
@@ -39,7 +39,7 @@ def make_streaming_first_event_is_task_contract(transport: Transport, agent_url:
                 f"message-only stream MUST contain exactly one Message and then "
                 f"close (§3.1.2); got {len(events)} events"
             )
-            return "message-only stream (agent answered with a Message, not a Task)"
+            return Info("message-only stream (agent answered with a Message, not a Task)")
         task = first.get("task") if isinstance(first, dict) else None
         assert looks_like_task(task), (
             'first SSE event MUST carry the Task (`{"task": {...}}`) or, for a '

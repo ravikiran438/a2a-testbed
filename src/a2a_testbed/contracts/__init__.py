@@ -12,6 +12,7 @@ from a2a_testbed.contracts.base import (
     Contract,
     ContractCategory,
     ContractResult,
+    ContractStatus,
 )
 from a2a_testbed.contracts.network.fault_recovery import (
     make_fault_recovery_contract,
@@ -66,6 +67,7 @@ __all__ = [
     "Contract",
     "ContractCategory",
     "ContractResult",
+    "ContractStatus",
     # Transport contracts (spec-derived from A2A 1.0 + JSON-RPC 2.0)
     "make_agent_card_capabilities_contract",
     "make_agent_card_required_fields_contract",

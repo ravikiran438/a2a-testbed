@@ -17,7 +17,7 @@ Clause:  ``SendMessage`` returns a ``SendMessageResponse`` that
 
 from __future__ import annotations
 
-from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.base import Contract, ContractCategory, Info
 from a2a_testbed.contracts.transport._task_helpers import AgentProbe, error_code
 from a2a_testbed.transport import Transport
 
@@ -43,7 +43,7 @@ def make_send_message_result_shape_contract(transport: Transport, agent_url: str
                 f"A2A 0.3 message/send result MUST be a Task or Message with "
                 f"kind 'task' / 'message'; got kind={kind!r}"
             )
-            return f"A2A 0.3 result kind={kind!r}"
+            return Info(f"A2A 0.3 result kind={kind!r}")
         present = [k for k in _ONEOF if k in result]
         assert len(present) == 1, (
             f"SendMessage result MUST contain exactly one of 'task' / 'message' "

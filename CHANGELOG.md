@@ -135,6 +135,64 @@ manifests that read an in-process agent's *response* see the 1.0
 is `SendMessage` rather than `message/send` (request-side paths such as
 `message.parts.0.text` are unchanged).
 
+### Added — conformance gate for CI
+
+- **GitHub Action** (`action.yml`, `uses: ravikiran438/a2a-testbed@v0`):
+  sweeps a live `url` and/or lints a `card` file, writes the job summary,
+  uploads SARIF to code scanning and fails the check on violations.
+  Self-tested in `.github/workflows/action-selftest.yml`. Usage in
+  `docs/ci.md`; the stories it was built for in `docs/consumer.md`.
+- **Report formats**: `--format table|json|junit|sarif|markdown` for stdout
+  and repeatable `-o PATH` files (`.json`, `.xml` JUnit, `.sarif`, `.md`);
+  a Markdown summary is appended to `$GITHUB_STEP_SUMMARY` when set.
+- **Baseline** (`.a2a-conformance.yaml`, `--baseline`, `--write-baseline`):
+  accepted failures, each with a required reason and optional owner and
+  expiry. Accepted rows stay visible (suppressed in SARIF); stale and
+  expired entries are reported. Under `--strict`, deviations can be
+  accepted too.
+- **SARIF for code scanning**: findings anchor to a repository file
+  (`--sarif-location`), fingerprints use the contract and file rather than
+  the agent URL (per-PR preview URLs do not reopen alerts), and
+  `--sarif-category` / the `sarif-category` input separate agents checked
+  by one workflow.
+- **`a2a-testbed lint-card FILE`**: the 15 card-only contracts of the live
+  sweep against an AgentCard file, no server needed.
+- **`--only CONTRACT_ID`** to run part of the live sweep.
+- **Release workflow** (`.github/workflows/release.yml`): builds, checks and
+  smoke-tests the wheel, then publishes to PyPI with trusted publishing on
+  a `v*` tag.
+
+### Changed — conformance results for CI
+
+- **Result status.** Every contract result now carries a status: `pass`,
+  `warn` (passed with a deviation), `skip`, `fail`, or `error` (the agent
+  did not answer). `passed` is unchanged. Contracts can return `Info(...)`
+  for a passing detail that is not a deviation; the version-served,
+  0.3 result-shape and message-only-stream notes now do, so `--strict` no
+  longer fails a conformant agent on them, nor on skipped contracts.
+- **Timeouts and retries.** Each contract has a time limit (`--timeout`,
+  45s). Timeouts and connection errors are `error`, retried once
+  (`--retries`); wrong answers are never retried. An SSE stream that
+  opens and then goes silent without closing is the agent's answer, so
+  it is a `fail`, not an `error`.
+- **Missing methods stay deviations.** "does not implement … (-32601)"
+  details (a method the agent advertises or A2A 1.0 requires) are `warn`,
+  so `--strict` still fails them; they are not "does not apply" skips.
+- **Exit codes.** `0` conformant, `1` a contract failed, `3` no failures but
+  some checks went unanswered, `2` usage error or agent unreachable. A dead
+  URL is caught up front (exit 2) instead of producing 62 failures.
+- **Push receiver.** `--push-receiver auto|local|hosted|off|URL`: loopback
+  agents get an in-process receiver on 127.0.0.1 (no external service);
+  remote agents use the hosted one. An unreachable or disabled receiver
+  skips push delivery instead of failing it.
+- **Installable from PyPI.** The A2A spec pin ships inside the package
+  (`spec_pin.toml`), so a wheel reports the right spec instead of
+  `unknown` or another project's `pyproject.toml`. README links are
+  absolute so they work on PyPI, and the package ships `py.typed`.
+- Two inconclusive outcomes are now reported as skips (`tasks_list_sorted_desc`
+  with fewer than two tasks, `streaming_artifact_update_shape` with no
+  artifact updates), in Python and the playground.
+
 ### Changed — AG-UI 1.0 for the ACS verdict projection
 
 - **Valid AG-UI 1.0 events.** An escalation's `RUN_FINISHED` interrupt now

@@ -22,7 +22,7 @@ Clause:  An AgentCard interface declares ``protocolBinding`` and
 
 from __future__ import annotations
 
-from a2a_testbed.contracts.base import Contract, ContractCategory
+from a2a_testbed.contracts.base import Contract, ContractCategory, Info
 from a2a_testbed.contracts.transport._task_helpers import (
     METHOD_NOT_FOUND_CODE,
     AgentProbe,
@@ -69,7 +69,7 @@ def make_advertised_version_served_contract(transport: Transport, agent_url: str
                 "although its AgentCard advertises that version (§3.6.2)"
             )
         assert envelope, f"{probe.method('send')} did not return a JSON-RPC envelope"
-        return f"agent serves A2A {advertised} as advertised ({probe.method('send')})"
+        return Info(f"agent serves A2A {advertised} as advertised ({probe.method('send')})")
 
     return Contract(
         id="transport.advertised_version_served",
