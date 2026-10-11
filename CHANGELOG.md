@@ -5,6 +5,39 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 aims to follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 versions may include breaking changes).
 
+## [0.3.0a1] — unreleased
+
+### Changed (breaking) — scenario extension expectations are checked
+
+- **Fixed: extension expectations always passed.** Up to 0.2.0a1 a step's
+  `acap:`, `phala:`, `nerve:` and `pace:` blocks were copied into the step
+  detail and never evaluated, so a step passed whatever they asserted.
+  Results from scenarios that relied on them should be re-run.
+- **New schema: `expect.extensions`**, keyed by extension URI. Each check
+  names a tool on that extension's MCP server, its arguments and the
+  expected verdict (`ok`, `violation` or `rejected`); a URI can carry a
+  list of checks. The step fails closed on a wrong verdict, an
+  unconfigured URI, a missing server or tool, a dead or silent server, or
+  a malformed answer. The old field names are a load error with a
+  migration hint, and unknown `expect:` keys are now rejected. See
+  `docs/scenarios.md`.
+- **MCP delegates are configuration.** The four built-in delegates and
+  `make_default_registry()` are gone; the testbed source names no
+  protocol. Delegates come from a scenario's `mcp_delegates:` (file or
+  inline list), `run --mcp-delegates FILE` (overrides per URI) and
+  `validate --via-mcp --mcp-delegates FILE` (now required with
+  `--via-mcp`). `examples/mcp-delegates.yaml` carries the four reference
+  protocols. `MCPDelegate.payload_validator_tool` / `payload_arg_name`
+  are now `card_validator_tool` / `card_arg_name`.
+- **MCP SDK 2.x.** Error results are read from `is_error` as well as
+  `isError`; under SDK 2.x the old code never saw them, so card checks
+  that a server rejected with an error were not reported as failures.
+- `examples/scenarios/three_party_consent.yaml` lost its unchecked
+  extension blocks; `examples/scenarios/extension_checks.yaml` shows real
+  checks against the PACE server.
+- The release workflow only runs for full version tags (`v*.*.*`), so
+  moving the Action's `v0` tag no longer starts a failing release run.
+
 ## [0.2.0a1] — unreleased
 
 ### Added — Agent Control Specification (ACS) runtime governance

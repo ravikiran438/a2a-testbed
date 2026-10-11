@@ -363,6 +363,7 @@ Bundled under `examples/scenarios/`:
 | Scenario | Demonstrates |
 |---|---|
 | `three_party_consent.yaml` | 5-step three-party guardian-mediated flow across 3 in-process agents |
+| `extension_checks.yaml` | Extension semantics checked on the protocol's own MCP server (`expect.extensions`, here PACE time windows and language match); needs `pace-mcp`, see [docs/scenarios.md](https://github.com/ravikiran438/a2a-testbed/blob/main/docs/scenarios.md) |
 | `fault_injection.yaml` | Drop / delay / corrupt / synthetic HTTP error at the orchestrator's wire seam |
 | `time_advance.yaml` | Virtual clock advanced explicitly between message steps for TTL / refresh testing |
 | `observer_audit.yaml` | Observer agent receives every wire exchange via traffic taps |

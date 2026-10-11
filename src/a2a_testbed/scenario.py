@@ -144,6 +144,7 @@ class ScenarioRunner:
         probe_external: bool = False,
         acs_manifest_path: Optional[Union[str, Path]] = None,
         acs_enforce: Optional[bool] = None,
+        mcp_delegates_path: Optional[Union[str, Path]] = None,
     ) -> None:
         self._timeout = http_timeout
         self._log_level = log_level
@@ -168,6 +169,10 @@ class ScenarioRunner:
         self._acs = None
         # Effective enforce flag for the current run (resolved in `run`).
         self._acs_enforce = False
+        # Delegates file from `--mcp-delegates`; its entries override the
+        # scenario's `mcp_delegates:` per URI. Resolved per run.
+        self._mcp_delegates_path = mcp_delegates_path
+        self._delegates = None
 
     async def run_file(self, scenario_path: Union[str, Path]) -> ScenarioResult:
         scenario = load_scenario(scenario_path)
@@ -182,6 +187,7 @@ class ScenarioRunner:
     ) -> ScenarioResult:
         scenario_dir = scenario_dir or Path.cwd()
         self._acs = self._load_acs(scenario, scenario_dir)
+        self._delegates = self._load_delegates(scenario, scenario_dir)
         # Resolve enforce mode: explicit flag wins, else the scenario field.
         self._acs_enforce = (
             self._acs_enforce_override
@@ -193,6 +199,81 @@ class ScenarioRunner:
         if scenario.mode == NetworkMode.REALISTIC:
             return await self._run_realistic(scenario, scenario_dir)
         raise NotImplementedError(f"unknown network mode {scenario.mode!r}")
+
+    def _load_delegates(self, scenario: Scenario, scenario_dir: Path):
+        """MCP delegates for `expect.extensions`: the scenario's
+        ``mcp_delegates:`` (file path or inline list), overridden per URI
+        by the ``--mcp-delegates`` file."""
+        from a2a_testbed.extensions import (
+            DelegateConfigError,
+            MCPDelegateRegistry,
+            load_delegates,
+            parse_delegates,
+        )
+
+        registry = MCPDelegateRegistry()
+        try:
+            declared = scenario.mcp_delegates
+            if isinstance(declared, str):
+                path = Path(declared)
+                if not path.is_absolute():
+                    path = (scenario_dir / path).resolve()
+                registry = load_delegates(path)
+            elif declared is not None:
+                registry = parse_delegates(
+                    declared, source="scenario mcp_delegates", base_dir=scenario_dir
+                )
+            if self._mcp_delegates_path is not None:
+                registry = registry.merged(load_delegates(self._mcp_delegates_path))
+        except DelegateConfigError as exc:
+            raise ScenarioLoadError(str(exc)) from exc
+        return registry
+
+    async def _check_extensions(self, expect: Expectation) -> tuple[bool, str]:
+        """Run every ``expect.extensions`` check on its MCP server.
+
+        Fails closed: a wrong verdict, an unconfigured URI, a missing
+        server or tool, or an unusable answer each fails the step, with
+        the URI and tool in the detail.
+        """
+        from a2a_testbed.extensions import ToolNotFound, call_extension_tool
+        from a2a_testbed.extensions.mcp_delegation import _MalformedToolResponse, describe_error
+
+        passed: list[str] = []
+        for uri, check in expect.extension_checks():
+            where = f"{uri} {check.tool}"
+            delegate = self._delegates.get(uri) if self._delegates is not None else None
+            if delegate is None:
+                return False, (
+                    f"extension check failed: no MCP delegate configured for {uri} "
+                    "(add it to mcp_delegates: or --mcp-delegates)"
+                )
+            try:
+                outcome, raw = await call_extension_tool(delegate, check.tool, check.args)
+            except FileNotFoundError:
+                return False, (
+                    f"extension check failed: {where}: MCP server command not found: "
+                    f"{' '.join(delegate.argv())}"
+                )
+            except ToolNotFound as exc:
+                return False, f"extension check failed: {where}: {exc}"
+            except _MalformedToolResponse as exc:
+                return False, f"extension check failed: {where}: {exc}"
+            except Exception as exc:  # transport failure, crash, timeout
+                return False, (
+                    f"extension check failed: {where}: MCP server unavailable "
+                    f"({describe_error(exc)})"
+                )
+            if outcome.value != check.verdict:
+                excerpt = " ".join(raw.split())
+                if len(excerpt) > 200:
+                    excerpt = excerpt[:197] + "..."
+                return False, (
+                    f"extension check failed: {where}: expected {check.verdict}, "
+                    f"got {outcome.value}: {excerpt}"
+                )
+            passed.append(f"{check.tool}={outcome.value}")
+        return True, "extension checks passed: " + ", ".join(passed)
 
     def _load_acs(self, scenario: Scenario, scenario_dir: Path):
         """Resolve + load the ACS manifest for this run, if any.
@@ -606,6 +687,9 @@ class ScenarioRunner:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         body_excerpt = self._excerpt(response.text)
         passed, detail = self._evaluate(step.expect, response, body_excerpt)
+        if passed and step.expect is not None and step.expect.extensions:
+            passed, ext_detail = await self._check_extensions(step.expect)
+            detail = ext_detail if not passed else f"{detail}; {ext_detail}"
         detail += fallback_note
         # ACS POST-dispatch checkpoints (post_tool_call / output).
         post_verdicts = await self._evaluate_acs(step, payload, response, phase="post")
@@ -758,13 +842,6 @@ class ScenarioRunner:
         if expect.response_contains and expect.response_contains not in body:
             return False, f"response did not contain {expect.response_contains!r}"
 
-        recorded: list[str] = []
-        for label in ("acap", "phala", "nerve", "pace"):
-            spec = getattr(expect, label, None)
-            if spec:
-                recorded.append(f"{label}={json.dumps(spec, sort_keys=True)}")
-        if recorded:
-            return True, "passed; extension expectations recorded: " + ", ".join(recorded)
         return True, "passed"
 
 
@@ -775,11 +852,13 @@ async def run_scenario_file(
     probe_external: bool = False,
     acs: Optional[Union[str, Path]] = None,
     acs_enforce: Optional[bool] = None,
+    mcp_delegates: Optional[Union[str, Path]] = None,
 ) -> ScenarioResult:
     runner = ScenarioRunner(
         log_level=log_level,
         probe_external=probe_external,
         acs_manifest_path=acs,
         acs_enforce=acs_enforce,
+        mcp_delegates_path=mcp_delegates,
     )
     return await runner.run_file(path)

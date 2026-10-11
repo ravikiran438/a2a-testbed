@@ -1,0 +1,47 @@
+# MCP delegates: which MCP server checks which A2A extension.
+#
+# The testbed has no built-in knowledge of any extension protocol. When a
+# scenario step says
+#
+#   expect:
+#     extensions:
+#       "<extension URI>": {tool: ..., args: {...}, verdict: ok|violation|rejected}
+#
+# or `a2a-testbed validate --via-mcp` checks an AgentCard extension, the
+# testbed looks the URI up here, starts that MCP server over stdio and
+# calls the tool. Use this file with `--mcp-delegates`, or reference it
+# from a scenario (`mcp_delegates: ../mcp-delegates.yaml`).
+#
+# Fields per delegate:
+#   uri                  extension URI (as declared in AgentCards)
+#   command              argv that starts the server; "{python}" is the
+#                        interpreter running the testbed
+#   card_validator_tool  optional: tool `validate --via-mcp` calls with the
+#                        card extension's params
+#   card_arg_name        optional: argument name for that call (default "ref")
+#   env                  optional: extra environment variables
+#
+# The four entries below are the reference protocols of the agent protocol
+# stack. Each command is the console script the protocol package installs
+# with its `mcp` extra, e.g.
+#   uv tool install "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace"
+# or, without installing, run it through uvx:
+#   command: [uvx, --python, "3.14", --from,
+#             "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace", pace-mcp]
+
+delegates:
+  - uri: https://ravikiran438.github.io/agent-consent-protocol/v1
+    command: [acap-mcp]
+    card_validator_tool: validate_usage_policy_ref
+
+  - uri: https://ravikiran438.github.io/phala-protocol/v1
+    command: [phala-mcp]
+    card_validator_tool: validate_phala_service_ref
+
+  - uri: https://ravikiran438.github.io/pratyahara-nerve/v1
+    command: [nerve-mcp]
+    card_validator_tool: validate_neural_posture_ref
+
+  - uri: https://ravikiran438.github.io/sauvidya-pace/v1
+    command: [pace-mcp]
+    card_validator_tool: validate_accessibility_service_ref

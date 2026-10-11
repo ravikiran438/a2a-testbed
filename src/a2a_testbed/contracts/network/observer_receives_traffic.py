@@ -8,7 +8,7 @@ every wire exchange that flowed through the network.
   Rationale: A2A is a per-agent specification — it normatively
            constrains how a single agent behaves on the wire, not how
            a network of agents coordinates. Multi-agent observability
-           is a load-bearing precondition for protocols like NERVE
+           is a load-bearing precondition for integrity-monitoring extensions
            (behavioral fingerprint accumulation across the network);
            without this contract, a network could silently drop observer
            notifications and break drift detection. The contract has

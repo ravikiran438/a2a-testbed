@@ -79,19 +79,38 @@ def run(
             "the flow. Overrides the scenario's `acs_enforce:` field."
         ),
     ),
+    mcp_delegates: Path | None = typer.Option(
+        None,
+        "--mcp-delegates",
+        help=(
+            "MCP delegates file mapping extension URIs to the MCP servers that "
+            "check them (see examples/mcp-delegates.yaml). Used for steps with `expect.extensions`; overrides the scenario's `mcp_delegates:` per URI."
+        ),
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
 ) -> None:
     """Run a scenario and print a colored summary."""
-    result = asyncio.run(
-        run_scenario_file(
-            scenario,
-            log_level=log_level,
-            probe_external=probe_external,
-            acs=acs,
-            # Pass True only when the flag is set; None defers to the
-            # scenario's `acs_enforce:` field.
-            acs_enforce=True if acs_enforce else None,
+    from a2a_testbed.scenario import ScenarioLoadError
+
+    try:
+        result = asyncio.run(
+            run_scenario_file(
+                scenario,
+                log_level=log_level,
+                probe_external=probe_external,
+                acs=acs,
+                # Pass True only when the flag is set; None defers to the
+                # scenario's `acs_enforce:` field.
+                acs_enforce=True if acs_enforce else None,
+                mcp_delegates=mcp_delegates,
+            )
         )
-    )
+    except ScenarioLoadError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=2) from exc
 
     table = Table(
         title=f"{result.scenario_name}  ({result.mode.value})",
@@ -374,10 +393,21 @@ def validate_cmd(
         help=(
             "Additionally delegate semantic validation to each protocol's "
             "registered MCP server (deeper than the manifest's JSON Schema "
-            "check). Spawns each server as a subprocess; requires the "
-            "protocol package to be installed. Default registry covers "
-            "Phala, NERVE, and PACE."
+            "check). Spawns each server configured in --mcp-delegates as a "
+            "subprocess and calls its card_validator_tool."
         ),
+    ),
+    mcp_delegates: Path | None = typer.Option(
+        None,
+        "--mcp-delegates",
+        help=(
+            "MCP delegates file mapping extension URIs to the MCP servers that "
+            "check them (see examples/mcp-delegates.yaml). Required with --via-mcp."
+        ),
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
     ),
 ) -> None:
     """Offline AgentCard validation against local manifests.
@@ -430,16 +460,28 @@ def validate_cmd(
     findings = asyncio.run(validate_agent_card(card, store=store))
 
     mcp_findings = []
+    if mcp_delegates is not None and not via_mcp:
+        console.print("[yellow]! --mcp-delegates has no effect without --via-mcp[/yellow]")
     if via_mcp:
         from a2a_testbed.extensions import (
+            DelegateConfigError,
             delegate_validate_card,
-            make_default_registry,
+            load_delegates,
         )
 
-        try:
-            mcp_findings = asyncio.run(
-                delegate_validate_card(card, registry=make_default_registry())
+        if mcp_delegates is None:
+            console.print(
+                "[red]✗ --via-mcp needs --mcp-delegates FILE: the testbed has no built-in "
+                "MCP servers (see examples/mcp-delegates.yaml)[/red]"
             )
+            raise typer.Exit(code=2)
+        try:
+            registry = load_delegates(mcp_delegates)
+        except DelegateConfigError as exc:
+            console.print(f"[red]✗ {exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        try:
+            mcp_findings = asyncio.run(delegate_validate_card(card, registry=registry))
         except Exception as exc:
             console.print(f"[yellow]! MCP delegation skipped:[/yellow] {type(exc).__name__}: {exc}")
 

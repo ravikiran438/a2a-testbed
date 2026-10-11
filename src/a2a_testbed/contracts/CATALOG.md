@@ -286,7 +286,7 @@ Planned network contracts include:
 | Contract id | Concept |
 |---|---|
 | `network.observer_completeness` | observer agents see every completed wire exchange |
-| `network.consent_chain_audit` | ACAP-extension-aware: every consent step appears in the chain |
+| `network.consent_chain_audit` | consent-extension-aware: every consent step appears in the chain |
 | `network.fault_recovery_drop` | network handles `drop` faults without losing state |
 | `network.fault_recovery_delay` | network handles `delay` faults; deadlines respected |
 | `network.cross_sdk_interop` | identical scenario produces identical observable behavior across Python / Go / Node.js / Java agents |

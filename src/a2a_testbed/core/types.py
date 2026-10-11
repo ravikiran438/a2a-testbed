@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class NetworkMode(str, Enum):
@@ -66,10 +66,32 @@ class StepKind(str, Enum):
     ADVANCE_TIME = "advance_time"
 
 
+class ExtensionCheck(BaseModel):
+    """One extension-semantics check for a step, run on the extension's
+    MCP server (see ``extensions.mcp_delegation``)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    tool: str = Field(..., min_length=1, description="MCP tool on the extension's server.")
+    args: dict[str, Any] = Field(default_factory=dict, description="Tool arguments.")
+    verdict: Literal["ok", "violation", "rejected"] = Field(
+        default="ok",
+        description=(
+            "Expected answer: 'ok' ({\"ok\": true}), 'violation' ({\"ok\": false}), "
+            "or 'rejected' (the server flagged the call as an error)."
+        ),
+    )
+
+
+# Field names of the pre-0.3 schema, where four protocols were hardcoded
+# and their expectations were recorded but never checked.
+_LEGACY_EXTENSION_FIELDS = ("acap", "phala", "nerve", "pace")
+
+
 class Expectation(BaseModel):
     """Per-step expected outcome."""
 
-    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     response_status: Optional[str] = Field(
         default=None,
@@ -77,19 +99,49 @@ class Expectation(BaseModel):
     )
     response_contains: Optional[str] = None
     timeout_ms: Optional[int] = Field(default=None, ge=1)
-    # Extension-specific expectations: free-form dicts that downstream
-    # semantic validators (typically a protocol's MCP server) consume
-    # at scenario-evaluation time.
-    acap: Optional[dict[str, Any]] = None
-    phala: Optional[dict[str, Any]] = None
-    nerve: Optional[dict[str, Any]] = None
-    pace: Optional[dict[str, Any]] = None
+    # Extension-semantics checks keyed by extension URI. Each is run on
+    # the MCP server configured for that URI (scenario `mcp_delegates:`
+    # or `--mcp-delegates`); the step fails unless every check returns
+    # its expected verdict.
+    extensions: Optional[
+        Annotated[
+            dict[
+                str,
+                Union[ExtensionCheck, Annotated[list[ExtensionCheck], Field(min_length=1)]],
+            ],
+            Field(min_length=1),
+        ]
+    ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            legacy = [k for k in _LEGACY_EXTENSION_FIELDS if k in data]
+            if legacy:
+                raise ValueError(
+                    f"expect.{legacy[0]} is no longer supported: extension expectations "
+                    "are keyed by extension URI and checked on that extension's MCP server. "
+                    'Use expect.extensions: {"<extension URI>": {tool: ..., args: {...}, '
+                    "verdict: ok|violation|rejected}} (see docs/scenarios.md)."
+                )
+        return data
+
+    def extension_checks(self) -> list[tuple[str, ExtensionCheck]]:
+        """Every (URI, check) pair, in declaration order."""
+        out: list[tuple[str, ExtensionCheck]] = []
+        for uri, checks in (self.extensions or {}).items():
+            for check in checks if isinstance(checks, list) else [checks]:
+                out.append((uri, check))
+        return out
 
 
 class Step(BaseModel):
     """One step in a scenario flow."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    # forbid: a misspelt or mis-indented key (`expext:`, `extensions:`
+    # beside `expect:`) must fail the load, not silently drop a check.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     kind: StepKind = StepKind.SEND
     from_: Optional[str] = Field(default=None, alias="from")
@@ -101,6 +153,14 @@ class Step(BaseModel):
     expect: Optional[Expectation] = None
     # ADVANCE_TIME-only fields
     advance_seconds: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _extension_checks_need_a_send(self) -> "Step":
+        if self.expect and self.expect.extensions and self.kind != StepKind.SEND:
+            raise ValueError(
+                f"expect.extensions is only evaluated on send steps, not kind={self.kind.value}"
+            )
+        return self
 
 
 class AgentDecl(BaseModel):
@@ -147,7 +207,7 @@ class ReportSink(BaseModel):
 class Scenario(BaseModel):
     """Top-level scenario document loaded from YAML."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str
     description: Optional[str] = None
@@ -168,6 +228,11 @@ class Scenario(BaseModel):
     # recorded and surfaced but the flow proceeds. The `--acs-enforce`
     # CLI flag overrides this.
     acs_enforce: bool = False
+    # MCP servers that check extension semantics (`expect.extensions`):
+    # a path to a delegates file (relative to the scenario file) or an
+    # inline list of delegate entries. `--mcp-delegates` entries override
+    # these per URI. See examples/mcp-delegates.yaml.
+    mcp_delegates: Optional[Union[str, list[dict[str, Any]], dict[str, Any]]] = None
 
 
 # ---------------------------------------------------------------------------

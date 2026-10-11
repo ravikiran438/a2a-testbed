@@ -1,0 +1,111 @@
+# Extension-semantics checks on a protocol's own MCP server.
+#
+# HTTP expectations prove a message was delivered; `expect.extensions`
+# asks the extension's MCP server whether the interaction obeyed the
+# extension's rules. Each check names the extension URI, a tool on that
+# extension's server, the tool arguments, and the verdict the step must
+# get back:
+#
+#   ok         the tool answered {"ok": true}
+#   violation  the tool answered {"ok": false}  (the rule was broken)
+#   rejected   the server flagged the call as an error (e.g. bad arguments)
+#
+# A wrong verdict, an extension URI with no configured server, a missing
+# server or tool, or an unusable answer fails the step.
+#
+# Needs the PACE MCP server (`pace-mcp`, see examples/mcp-delegates.yaml):
+#   uv tool install --python 3.14 "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace"
+#   a2a-testbed run examples/scenarios/extension_checks.yaml
+
+name: "Extension checks: PACE interaction rules"
+description: |
+  Bob relays Alice's delivery to Carol. Alice's adaptive interaction
+  contract (Telugu, voice-first, no contact during the 17:00-08:00
+  sundown block) is checked on the PACE MCP server at each step: the
+  10:00 delivery window is allowed, a 19:00 follow-up is a violation,
+  and a plan in English for a Telugu-speaking principal is a violation.
+
+mode: sim
+mcp_delegates: ../mcp-delegates.yaml
+
+agents:
+  - id: alice
+    card: ../agent-cards/three-party/alice.json
+    runtime: python_inproc
+    role: principal
+  - id: bob
+    card: ../agent-cards/three-party/bob.json
+    runtime: python_inproc
+    role: guardian
+  - id: carol
+    card: ../agent-cards/three-party/carol.json
+    runtime: python_inproc
+    role: service_provider
+
+flow:
+  - from: bob
+    to: carol
+    action: grant_consent
+    message: "grant_consent: approved, deliver at 10:00"
+    expect:
+      response_status: "2xx"
+      extensions:
+        "https://ravikiran438.github.io/sauvidya-pace/v1":
+          - tool: validate_language_match
+            args:
+              modality: &modality_te
+                agent_id: carol
+                principal_id: alice
+                pcp_version: v1
+                modality_plan: {primary_channel: voice, language: te, max_options: 2, timeout_seconds: 300}
+              pcp: &pcp_alice
+                principal_id: alice
+                version: v1
+                declared_at: "2026-04-17T10:00:00Z"
+                declared_by: "guardian:bob"
+                language: [{code: te, fluency: 1.0}]
+                decision_capacity: fluctuating
+            verdict: ok
+          - tool: validate_time_window
+            args:
+              contract: &contract_alice
+                principal_id: alice
+                pcp_version: v1
+                interaction_rules:
+                  language: te
+                  valid_time_windows: [{start: "09:00", end: "11:00"}, {start: "14:00", end: "16:00"}]
+                  sundown_block: {start: "17:00", end: "08:00"}
+              current_time_hhmm: "10:00"
+            verdict: ok
+
+  - from: carol
+    to: alice
+    action: deliver
+    message: "deliver: follow-up call at 19:00"
+    expect:
+      response_status: "2xx"
+      extensions:
+        "https://ravikiran438.github.io/sauvidya-pace/v1":
+          tool: validate_time_window
+          args:
+            contract: *contract_alice
+            current_time_hhmm: "19:00"
+          verdict: violation
+
+  - from: carol
+    to: alice
+    action: feedback
+    message: "feedback: survey sent in English"
+    expect:
+      response_status: "2xx"
+      extensions:
+        "https://ravikiran438.github.io/sauvidya-pace/v1":
+          tool: validate_language_match
+          args:
+            modality:
+              agent_id: carol
+              principal_id: alice
+              pcp_version: v1
+              modality_plan: {primary_channel: text, language: en, max_options: 2, timeout_seconds: 300}
+            pcp: *pcp_alice
+          verdict: violation

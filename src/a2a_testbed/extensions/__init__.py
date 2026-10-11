@@ -9,11 +9,11 @@ fast and offline-friendly, but it can't enforce semantic invariants
 that only the protocol implementation knows (cross-field constraints,
 wire-format rules, lookup-table consistency).
 
-For those, the protocol ships its own MCP server with validator tools
-(e.g. ``validate_phala_service_ref``). The testbed delegates: it
-spawns the protocol's MCP server over stdio, calls the relevant
-validator tool with the payload, and surfaces the structured result
-as a finding.
+For those, the protocol ships its own MCP server with validator tools.
+The testbed delegates: it spawns the protocol's MCP server over stdio,
+calls the relevant tool, and surfaces the structured result as a
+finding. Which server serves which extension URI is configuration
+(a delegates file; see ``examples/mcp-delegates.yaml``), never code.
 
 Both layers compose: manifest validation runs first (cheap, offline);
 MCP delegation is the second-tier deeper check that requires the
@@ -21,22 +21,30 @@ protocol's installed MCP server.
 """
 
 from a2a_testbed.extensions.mcp_delegation import (
-    DEFAULT_MCP_DELEGATES,
+    DelegateConfigError,
     MCPDelegate,
     MCPDelegateRegistry,
     MCPFinding,
     MCPFindingKind,
+    ToolNotFound,
+    ToolOutcome,
+    call_extension_tool,
     delegate_validate_card,
-    make_default_registry,
+    load_delegates,
+    parse_delegates,
 )
 
 
 __all__ = [
-    "DEFAULT_MCP_DELEGATES",
+    "DelegateConfigError",
     "MCPDelegate",
     "MCPDelegateRegistry",
     "MCPFinding",
     "MCPFindingKind",
+    "ToolNotFound",
+    "ToolOutcome",
+    "call_extension_tool",
     "delegate_validate_card",
-    "make_default_registry",
+    "load_delegates",
+    "parse_delegates",
 ]
