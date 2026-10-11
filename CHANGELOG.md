@@ -5,7 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 aims to follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 versions may include breaking changes).
 
-## [Unreleased]
+## [0.3.0a2] — unreleased
+
+### Fixed
+
+- **MCP servers inherit the full environment.** A delegate without `env:`
+  was started with the MCP SDK's minimal default environment, which drops
+  `HTTPS_PROXY` and the other proxy variables, so a server fetched at
+  start-up (the pinned `uvx --from git+...` PACE delegate) could not reach
+  GitHub behind a proxy and every check failed with "MCP server
+  unavailable (Connection closed)". `env:` entries still override.
 
 ### Changed
 

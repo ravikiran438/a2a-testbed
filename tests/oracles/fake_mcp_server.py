@@ -10,12 +10,14 @@ Tools:
 - ``garbage`` — answers plain text: a malformed response.
 - ``echo``    — answers ``{"ok": true, "args": <arguments>}``.
 - ``not_a_verdict`` — answers ``{"ok": null}``: malformed.
+- ``env``     — answers ``{"ok": true, "value": <os.environ[args.name]>}``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
 from mcp.server import Server
@@ -31,7 +33,7 @@ from mcp.types import (
 )
 
 _SCHEMA = {"type": "object", "additionalProperties": True}
-TOOLS = ("check", "reject", "garbage", "echo", "not_a_verdict")
+TOOLS = ("check", "reject", "garbage", "echo", "not_a_verdict", "env")
 
 
 async def _list_tools(
@@ -58,6 +60,8 @@ async def _call_tool(
         return _text("this is not json")
     if params.name == "not_a_verdict":
         return _text(json.dumps({"ok": None, "error": "internal"}))
+    if params.name == "env":
+        return _text(json.dumps({"ok": True, "value": os.environ.get(str(args.get("name")))}))
     if params.name == "echo":
         return _text(json.dumps({"ok": True, "args": args}))
     return _text(f"unknown tool {params.name!r}", error=True)

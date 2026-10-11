@@ -251,7 +251,11 @@ def _server_params(delegate: MCPDelegate) -> StdioServerParameters:
     argv = delegate.argv()
     if shutil.which(argv[0]) is None and not os.path.exists(argv[0]):
         raise FileNotFoundError(2, "command not found", argv[0])
-    env = {**os.environ, **delegate.env} if delegate.env else None
+    # Always pass the full environment. With env=None the MCP SDK starts
+    # the server with a minimal allow-list (HOME, PATH, ...) that drops
+    # HTTPS_PROXY and friends, so a server fetched at start-up (uvx
+    # --from git+...) cannot reach the network behind a proxy.
+    env = {**os.environ, **delegate.env}
     return StdioServerParameters(command=argv[0], args=argv[1:], env=env)
 
 

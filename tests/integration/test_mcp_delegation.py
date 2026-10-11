@@ -175,3 +175,33 @@ def test_acap_mcp_delegation_fails_when_acceptance_endpoint_missing():
     assert "acceptance_endpoint" in findings[0].detail.lower() or (
         "acceptance_endpoint" in (findings[0].raw_response or "").lower()
     )
+
+
+FAKE_SERVER = Path(__file__).resolve().parents[1] / "oracles" / "fake_mcp_server.py"
+
+
+def _env_value(delegate: MCPDelegate, name: str):
+    import json
+
+    from a2a_testbed.extensions import call_extension_tool
+
+    _, raw = asyncio.run(call_extension_tool(delegate, "env", {"name": name}))
+    return json.loads(raw)["value"]
+
+
+def test_server_inherits_the_parent_environment(monkeypatch):
+    """Without `env:`, the server still sees the parent's variables (proxy
+    settings above all), not the MCP SDK's minimal default set."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("A2A_TESTBED_PROBE", "inherited")
+    plain = MCPDelegate("u", ("{python}", str(FAKE_SERVER)))
+    assert _env_value(plain, "HTTPS_PROXY") == "http://proxy.example:3128"
+    assert _env_value(plain, "A2A_TESTBED_PROBE") == "inherited"
+
+
+def test_delegate_env_overrides_the_parent(monkeypatch):
+    monkeypatch.setenv("A2A_TESTBED_PROBE", "inherited")
+    delegate = MCPDelegate(
+        "u", ("{python}", str(FAKE_SERVER)), env={"A2A_TESTBED_PROBE": "override"}
+    )
+    assert _env_value(delegate, "A2A_TESTBED_PROBE") == "override"
