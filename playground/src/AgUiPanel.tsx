@@ -257,7 +257,9 @@ function VerdictProjector() {
 function RealVerdictRow({ label, verdict }: RunVerdict) {
   const [open, setOpen] = useState(false);
   const [resolved, setResolved] = useState<Decision | null>(null);
-  const event: AgUiEvent = projectVerdict(verdict);
+  // Memoized: an escalation's interrupt id is generated, so re-projecting on
+  // every render would change the id the Approve/Deny buttons answer.
+  const event: AgUiEvent = useMemo(() => projectVerdict(verdict), [verdict]);
   const mapLabel =
     event.type === 'RUN_FINISHED'
       ? 'RUN_FINISHED · interrupt'

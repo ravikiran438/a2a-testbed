@@ -2,6 +2,7 @@
 
 from a2a_testbed.ag_ui.projection import (
     ACS_GOVERNANCE_URI,
+    AG_UI_PROTOCOL_VERSION,
     GOVERNANCE_KEY,
     project_verdict,
     resolve_escalation,
@@ -9,6 +10,7 @@ from a2a_testbed.ag_ui.projection import (
 
 __all__ = [
     "ACS_GOVERNANCE_URI",
+    "AG_UI_PROTOCOL_VERSION",
     "GOVERNANCE_KEY",
     "project_verdict",
     "resolve_escalation",

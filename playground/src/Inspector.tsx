@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Verdict } from './acsEvaluator';
 import { type AgUiEvent, projectVerdict, resolveEscalation } from './agUiProjection';
 import type { AgentCard, ScenarioStep } from './scenario';
@@ -279,7 +279,8 @@ export function Inspector({
 function AgUiVerdictRow({ verdict }: { verdict: Verdict }) {
   const [open, setOpen] = useState(false);
   const [resolved, setResolved] = useState<'allow' | 'deny' | null>(null);
-  const event: AgUiEvent = projectVerdict(verdict);
+  // Memoized: an escalation's interrupt id is generated per projection.
+  const event: AgUiEvent = useMemo(() => projectVerdict(verdict), [verdict]);
 
   const label =
     event.type === 'RUN_FINISHED'

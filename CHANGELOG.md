@@ -135,6 +135,24 @@ manifests that read an in-process agent's *response* see the 1.0
 is `SendMessage` rather than `message/send` (request-side paths such as
 `message.parts.0.text` are unchanged).
 
+### Changed — AG-UI 1.0 for the ACS verdict projection
+
+- **Valid AG-UI 1.0 events.** An escalation's `RUN_FINISHED` interrupt now
+  carries the required `threadId` and `runId` (`project_verdict(...,
+  thread_id=, run_id=)` / `projectVerdict(v, { threadId, runId })`, with
+  placeholder defaults for standalone use).
+- **Unique interrupt ids.** Each escalation gets its own id
+  (`acs-escalate-<point>-<random>`), so two escalations at the same
+  intervention point in one thread can no longer answer each other's resume.
+- **Resume arrays.** `resolve_escalation` / `resolveEscalation` accept the
+  AG-UI 1.0 `RunAgentInput.resume` array and pick the entry whose
+  `interruptId` matches. No matching entry, or a single entry addressed to a
+  different interrupt, fails closed to `deny`; a single entry without an
+  `interruptId` is still accepted.
+- **Checked against the official SDK.** `ag-ui-protocol` (1.x) joins the
+  `test`/`dev` extras, and every projected event and resume entry is
+  validated against its models; Python and playground output are identical.
+
 ## [0.1.0a1]
 
 - Initial alpha: multi-agent A2A scenario runner, polyglot runtimes
