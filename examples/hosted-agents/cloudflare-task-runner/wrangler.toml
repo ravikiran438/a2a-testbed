@@ -35,9 +35,8 @@ enabled = true
 
 # Per-IP rate limit binding. Tune `simple` to fit your usage;
 # `period` accepts only `10` or `60`.
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "TASK_RATE_LIMITER"
-type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 60, period = 60 }
 

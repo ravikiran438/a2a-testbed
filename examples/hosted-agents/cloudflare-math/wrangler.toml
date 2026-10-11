@@ -38,8 +38,7 @@ enabled = true
 #   key:    `cf-connecting-ip` of the requester (set by Cloudflare).
 #   limit:  number of requests allowed in the window.
 #   period: 10 or 60 (seconds) — the only values the binding accepts.
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "MATH_RATE_LIMITER"
-type = "ratelimit"
 namespace_id = "1001"
 simple = { limit = 60, period = 60 }

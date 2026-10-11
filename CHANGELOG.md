@@ -7,6 +7,14 @@ versions may include breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **Cloudflare example workers on wrangler 4** (math agent, task runner,
+  push receiver), with `@cloudflare/workers-types` 5. They need Node.js
+  22 or later. Rate limiters use wrangler's `[[ratelimits]]` binding
+  instead of the experimental `[[unsafe.bindings]]` form; behaviour is
+  unchanged (same names, namespaces and limits).
+
 ## [0.3.0a3] — 2026-10-11
 
 ### Changed

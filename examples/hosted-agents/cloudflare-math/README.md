@@ -31,7 +31,7 @@ daily request count.
 1. A Cloudflare account (free).
 2. A Groq API key — sign up at <https://console.groq.com/> and
    create a key (free).
-3. Node.js 20+.
+3. Node.js 22+ (wrangler 4 requires it).
 
 ## Deploy
 

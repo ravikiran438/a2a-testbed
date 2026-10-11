@@ -30,9 +30,8 @@ enabled = true
 # accepts webhooks from any agent), so this binding is the primary
 # write-cost cap. Tune `simple` to fit your usage; `period`
 # accepts only `10` or `60`.
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "RECEIVER_RATE_LIMITER"
-type = "ratelimit"
 namespace_id = "1003"
 simple = { limit = 60, period = 60 }
 
