@@ -76,6 +76,26 @@ def _synthetic_error(status: int, url: str) -> httpx.Response:
     return httpx.Response(status_code=status, content=body.encode("utf-8"), request=request)
 
 
+def _differs(original: str, candidate: str) -> str:
+    """``candidate`` if it differs from ``original``; otherwise a marked copy.
+
+    A corrupt fault must change the payload: a shuffle of "hello" or the
+    reverse of a palindrome can come out identical, and an unchanged
+    payload would make the fault a silent no-op.
+    """
+    return candidate if candidate != original else original + "#"
+
+
+def _scramble(text: str) -> str:
+    """Shuffle ``text``'s characters into a different order when one exists."""
+    if len(set(text)) > 1:
+        for _ in range(16):
+            shuffled = "".join(random.sample(text, len(text)))
+            if shuffled != text:
+                return shuffled
+    return _differs(text, text[::-1])
+
+
 def _corrupt_payload(payload: dict, pattern: Optional[str]) -> dict:
     """Return a shallow-mutated copy of *payload* with a substring scrambled.
 
@@ -83,8 +103,7 @@ def _corrupt_payload(payload: dict, pattern: Optional[str]) -> dict:
     """
     text = json.dumps(payload)
     if pattern and pattern in text:
-        scrambled = "".join(random.sample(pattern, len(pattern)))
-        text = text.replace(pattern, scrambled, 1)
+        text = text.replace(pattern, _scramble(pattern), 1)
     else:
         # Generic fallback: scramble the first message text part
         try:
@@ -95,7 +114,7 @@ def _corrupt_payload(payload: dict, pattern: Optional[str]) -> dict:
                 if isinstance(part, dict) and "text" in part:
                     s = part["text"]
                     if s:
-                        part["text"] = s[::-1]
+                        part["text"] = _differs(s, s[::-1])
                         return payload
         except (AttributeError, TypeError):
             pass

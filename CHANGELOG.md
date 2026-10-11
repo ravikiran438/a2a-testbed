@@ -15,6 +15,11 @@ versions may include breaking changes).
   start-up (the pinned `uvx --from git+...` PACE delegate) could not reach
   GitHub behind a proxy and every check failed with "MCP server
   unavailable (Connection closed)". `env:` entries still override.
+- **The corrupt fault always changes the payload.** It shuffled the
+  pattern's characters, and a shuffle can reproduce the input (1 in 60 for
+  "hello"); a palindrome reversed to itself in the fallback path. The
+  fault was then a silent no-op, and `test_corrupt_mutates_payload` failed
+  intermittently.
 
 ### Changed
 

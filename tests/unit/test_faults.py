@@ -45,9 +45,7 @@ async def test_drop_raises_dropped():
     transport = httpx.MockTransport(lambda r: httpx.Response(200))
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(DroppedRequest):
-            await apply_fault(
-                Fault(kind=FaultKind.DROP), "POST", "http://x/y", _payload(), client
-            )
+            await apply_fault(Fault(kind=FaultKind.DROP), "POST", "http://x/y", _payload(), client)
 
 
 @pytest.mark.asyncio
@@ -56,7 +54,10 @@ async def test_http_error_returns_synthetic():
     async with httpx.AsyncClient(transport=transport) as client:
         resp = await apply_fault(
             Fault(kind=FaultKind.HTTP_ERROR, http_status=503),
-            "POST", "http://x/y", _payload(), client,
+            "POST",
+            "http://x/y",
+            _payload(),
+            client,
         )
     assert resp.status_code == 503
     body = json.loads(resp.text)
@@ -66,14 +67,19 @@ async def test_http_error_returns_synthetic():
 @pytest.mark.asyncio
 async def test_delay_still_returns_response():
     received = []
+
     async def handler(request: httpx.Request) -> httpx.Response:
         received.append(request)
         return httpx.Response(200, json={"ok": True})
+
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
         resp = await apply_fault(
             Fault(kind=FaultKind.DELAY, delay_ms=10),
-            "POST", "http://x/y", _payload(), client,
+            "POST",
+            "http://x/y",
+            _payload(),
+            client,
         )
     assert resp.status_code == 200
     assert len(received) == 1
@@ -82,15 +88,34 @@ async def test_delay_still_returns_response():
 @pytest.mark.asyncio
 async def test_corrupt_mutates_payload():
     captured_bodies: list[bytes] = []
+
     async def handler(request: httpx.Request) -> httpx.Response:
         captured_bodies.append(request.content)
         return httpx.Response(200, json={"ok": True})
+
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
         await apply_fault(
             Fault(kind=FaultKind.CORRUPT, corrupt_pattern="hello"),
-            "POST", "http://x/y", _payload(), client,
+            "POST",
+            "http://x/y",
+            _payload(),
+            client,
         )
     sent = json.loads(captured_bodies[0].decode("utf-8"))
     text_part = sent["params"]["message"]["parts"][0]["text"]
     assert text_part != "hello"
+
+
+@pytest.mark.parametrize("text", ["hello", "zq", "zzz", "z", "xyyx"])
+def test_corrupt_always_changes_the_text(text):
+    """Shuffling can reproduce the input (1 in 60 for "hello"); the fault
+    must still change it, every time."""
+    from a2a_testbed.core.faults import _corrupt_payload
+
+    for _ in range(200):
+        payload = {"params": {"message": {"parts": [{"text": text}]}}}
+        out = _corrupt_payload(json.loads(json.dumps(payload)), text)
+        assert out["params"]["message"]["parts"][0]["text"] != text
+        fallback = _corrupt_payload(json.loads(json.dumps(payload)), None)
+        assert fallback["params"]["message"]["parts"][0]["text"] != text
