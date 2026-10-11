@@ -5,7 +5,20 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 aims to follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 versions may include breaking changes).
 
-## [0.3.0a1] — unreleased
+## [Unreleased]
+
+### Changed
+
+- `examples/mcp-delegates.yaml` pins the PACE MCP server to PACE v0.2.0
+  through uvx, and `examples/scenarios/extension_checks.yaml` follows its
+  time-zone-aware rules (`interaction_rules.timezone`, `at` timestamps).
+  The example was written against an older PACE and failed two steps on
+  v0.2.0. `docs/scenarios.md` explains why delegate versions should be
+  pinned.
+- The real-server example test runs only with `A2A_TESTBED_REAL_MCP=1`
+  (it needs uvx and network access).
+
+## [0.3.0a1] — 2026-10-11
 
 ### Changed (breaking) — scenario extension expectations are checked
 
@@ -38,7 +51,7 @@ versions may include breaking changes).
 - The release workflow only runs for full version tags (`v*.*.*`), so
   moving the Action's `v0` tag no longer starts a failing release run.
 
-## [0.2.0a1] — unreleased
+## [0.2.0a1] — 2026-10-11
 
 ### Added — Agent Control Specification (ACS) runtime governance
 

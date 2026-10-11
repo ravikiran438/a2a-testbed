@@ -102,6 +102,23 @@ The same file serves `a2a-testbed validate CARD --via-mcp --mcp-delegates
 FILE`, which calls each delegate's `card_validator_tool` with the card
 extension's `params`.
 
+### Pin the server version
+
+A delegate command runs whatever version of the server it finds: the
+first `my-extension-mcp` on `PATH`, or the latest commit of an unpinned
+`git+` install. When a protocol changes a tool's arguments or rules, an
+old server gives old verdicts, and the same scenario can pass on one
+machine and fail on another. Pin the version the scenario was written
+against, for example with uvx and a release tag:
+
+```yaml
+command: [uvx, --quiet, --from,
+          "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace@v0.2.0",
+          pace-mcp]
+```
+
+and move the pin deliberately when you update the scenario.
+
 ### Migrating from 0.2
 
 Up to 0.2.0a1, steps could carry `acap:`, `phala:`, `nerve:` or `pace:`

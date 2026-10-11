@@ -9,6 +9,7 @@ installed.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -253,7 +254,10 @@ async def test_malformed_delegates_block_is_a_load_error(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(shutil.which("pace-mcp") is None, reason="pace-mcp not installed")
+@pytest.mark.skipif(
+    os.environ.get("A2A_TESTBED_REAL_MCP") != "1" or shutil.which("uvx") is None,
+    reason="set A2A_TESTBED_REAL_MCP=1 (needs uvx and network) to run against the pinned PACE",
+)
 async def test_shipped_example_against_the_real_pace_server():
     example = REPO_ROOT / "examples" / "scenarios" / "extension_checks.yaml"
     result = await run_scenario_file(example, log_level="error")

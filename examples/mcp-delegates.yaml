@@ -22,12 +22,12 @@
 #   env                  optional: extra environment variables
 #
 # The four entries below are the reference protocols of the agent protocol
-# stack. Each command is the console script the protocol package installs
-# with its `mcp` extra, e.g.
-#   uv tool install "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace"
-# or, without installing, run it through uvx:
-#   command: [uvx, --python, "3.14", --from,
-#             "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace", pace-mcp]
+# stack. A command runs whatever version of the server it finds, and an
+# old server gives old verdicts, so pin the version your scenarios were
+# written against. PACE is pinned to a release tag through uvx (fetched on
+# first use, cached after). The others use the console script the protocol
+# package installs with its `mcp` extra, e.g.
+#   uv tool install "acap[mcp] @ git+https://github.com/ravikiran438/agent-consent-protocol"
 
 delegates:
   - uri: https://ravikiran438.github.io/agent-consent-protocol/v1
@@ -43,5 +43,12 @@ delegates:
     card_validator_tool: validate_neural_posture_ref
 
   - uri: https://ravikiran438.github.io/sauvidya-pace/v1
-    command: [pace-mcp]
+    command:
+      - uvx
+      - --quiet
+      - --python
+      - "3.14"
+      - --from
+      - "pace[mcp] @ git+https://github.com/ravikiran438/sauvidya-pace@v0.2.0"
+      - pace-mcp
     card_validator_tool: validate_accessibility_service_ref
