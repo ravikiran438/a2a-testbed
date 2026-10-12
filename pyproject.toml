@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "a2a-sdk[http-server]>=1.2.2",
-    "httpx>=0.28",
+    "httpx>=0.28,<1",  # 1.0 pre-releases drop names we use (TimeoutException)
     "jsonschema>=4.18",
     "mcp>=1.0",
     "pydantic>=2.6",

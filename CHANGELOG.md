@@ -7,6 +7,14 @@ versions may include breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **httpx capped below 1.0.** Installing with pre-releases allowed (for
+  example `uvx --prerelease allow a2a-testbed`) resolved httpx
+  `1.0.dev`, which drops `httpx.TimeoutException`, and every command that
+  loads the contracts crashed on import. A plain `uvx a2a-testbed` or
+  `pip install a2a-testbed` was not affected.
+
 ### Changed
 
 - **Cloudflare example workers on wrangler 4** (math agent, task runner,

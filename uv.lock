@@ -69,7 +69,7 @@ requires-dist = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.2.2" },
     { name = "ag-ui-protocol", marker = "extra == 'dev'", specifier = ">=1.0,<2" },
     { name = "ag-ui-protocol", marker = "extra == 'test'", specifier = ">=1.0,<2" },
-    { name = "httpx", specifier = ">=0.28" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "mcp", specifier = ">=1.0" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20" },
